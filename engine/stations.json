@@ -1,0 +1,33 @@
+{
+  "_source": "U.S. DOE EnergyPlus weather library (energyplus-weather.s3.amazonaws.com). Design-day (.ddy) files carry ASHRAE Handbook of Fundamentals climatic design conditions; .stat files carry ground temperatures and the algorithmic ASHRAE climate zone.",
+  "base_url": "https://energyplus-weather.s3.amazonaws.com/north_and_central_america_wmo_region_4/USA",
+  "stations": [
+    {"id": "honolulu",    "label": "Honolulu, HI",            "path": "HI/USA_HI_Honolulu.Intl.AP.911820_TMY3"},
+    {"id": "miami",       "label": "Miami, FL",               "path": "FL/USA_FL_Miami.Intl.AP.722020_TMY3"},
+    {"id": "tampa",       "label": "Tampa, FL",               "path": "FL/USA_FL_Tampa.Intl.AP.722110_TMY3"},
+    {"id": "houston",     "label": "Houston, TX",             "path": "TX/USA_TX_Houston-Bush.Intercontinental.AP.722430_TMY3"},
+    {"id": "phoenix",     "label": "Phoenix, AZ",             "path": "AZ/USA_AZ_Phoenix-Sky.Harbor.Intl.AP.722780_TMY3"},
+    {"id": "tucson",      "label": "Tucson, AZ",              "path": "AZ/USA_AZ_Tucson.Intl.AP.722740_TMY3"},
+    {"id": "atlanta",     "label": "Atlanta, GA",             "path": "GA/USA_GA_Atlanta-Hartsfield-Jackson.Intl.AP.722190_TMY3"},
+    {"id": "dallas",      "label": "Dallas-Fort Worth, TX",   "path": "TX/USA_TX_Dallas-Fort.Worth.Intl.AP.722590_TMY3"},
+    {"id": "elpaso",      "label": "El Paso, TX",             "path": "TX/USA_TX_El.Paso.Intl.AP.722700_TMY3"},
+    {"id": "losangeles",  "label": "Los Angeles, CA",         "path": "CA/USA_CA_Los.Angeles.Intl.AP.722950_TMY3"},
+    {"id": "sandiego",    "label": "San Diego, CA",           "path": "CA/USA_CA_San.Diego-Lindbergh.Field.722900_TMY3"},
+    {"id": "sanfrancisco","label": "San Francisco, CA",       "path": "CA/USA_CA_San.Francisco.Intl.AP.724940_TMY3"},
+    {"id": "washington",  "label": "Washington, DC (Reagan)", "path": "VA/USA_VA_Arlington-Ronald.Reagan.Washington.Natl.AP.724050_TMY3"},
+    {"id": "newyork",     "label": "New York, NY (JFK)",      "path": "NY/USA_NY_New.York-J.F.Kennedy.Intl.AP.744860_TMY3"},
+    {"id": "albuquerque", "label": "Albuquerque, NM",         "path": "NM/USA_NM_Albuquerque.Intl.AP.723650_TMY3"},
+    {"id": "seattle",     "label": "Seattle, WA",             "path": "WA/USA_WA_Seattle-Tacoma.Intl.AP.727930_TMY3"},
+    {"id": "stlouis",     "label": "St. Louis, MO",           "path": "MO/USA_MO_St.Louis-Lambert.Intl.AP.724340_TMY3"},
+    {"id": "kansascity",  "label": "Kansas City, MO",         "path": "MO/USA_MO_Kansas.City.Intl.AP.724460_TMY3"},
+    {"id": "chicago",     "label": "Chicago, IL (O'Hare)",    "path": "IL/USA_IL_Chicago-OHare.Intl.AP.725300_TMY3"},
+    {"id": "boston",      "label": "Boston, MA",              "path": "MA/USA_MA_Boston-Logan.Intl.AP.725090_TMY3"},
+    {"id": "buffalo",     "label": "Buffalo, NY",             "path": "NY/USA_NY_Buffalo-Greater.Buffalo.Intl.AP.725280_TMY3"},
+    {"id": "denver",      "label": "Denver, CO",              "path": "CO/USA_CO_Denver.Intl.AP.725650_TMY3"},
+    {"id": "portangeles", "label": "Port Angeles, WA",        "path": "WA/USA_WA_Port.Angeles-William.R.Fairchild.Intl.AP.727885_TMY3"},
+    {"id": "rochestermn", "label": "Rochester, MN",           "path": "MN/USA_MN_Rochester.Intl.AP.726440_TMY3"},
+    {"id": "greatfalls",  "label": "Great Falls, MT",         "path": "MT/USA_MT_Great.Falls.Intl.AP.727750_TMY3"},
+    {"id": "intlfalls",   "label": "International Falls, MN", "path": "MN/USA_MN_International.Falls.Intl.AP.727470_TMY3"},
+    {"id": "fairbanks",   "label": "Fairbanks, AK",           "path": "AK/USA_AK_Fairbanks.Intl.AP.702610_TMY3"}
+  ]
+}
