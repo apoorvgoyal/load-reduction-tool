@@ -47,6 +47,8 @@ OUTPUT_VARIABLES = [
     'Zone Ideal Loads Zone Sensible Heating Rate',
     'Zone Ideal Loads Outdoor Air Total Cooling Rate',
     'Zone Ideal Loads Outdoor Air Total Heating Rate',
+    'Zone Ideal Loads Heat Recovery Total Cooling Rate',
+    'Zone Ideal Loads Heat Recovery Total Heating Rate',
     'Zone Ideal Loads Supply Air Standard Density Volume Flow Rate',
     'Zone Ideal Loads Outdoor Air Standard Density Volume Flow Rate',
     'Site Outdoor Air Drybulb Temperature',

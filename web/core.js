@@ -105,7 +105,8 @@
       if (metric === 'total_w_m2') { r.total_w = v * gfa; r.err_pct = err; }
       else if (metric === 'sensible_w_m2') r.sensible_w = v * gfa;
       else if (metric === 'latent_w_m2') r.latent_w = v * gfa;
-      else if (metric === 'oa_w_m2') r.outdoor_air_w = v * gfa;
+      else if (metric === 'oa_w_m2') r.outdoor_air_w = v * gfa;        // before heat recovery
+      else if (metric === 'hr_w_m2') r.heat_recovery_w = v * gfa;
       else if (metric === 'supply_ls_m2') r.supply_air_m3s = v * gfa / 1000;
       else if (metric === 'sum_of_peaks_w_m2') r.sum_of_zone_peaks_w = v * gfa;
     });
@@ -119,7 +120,7 @@
     Object.keys(run.design_days || {}).forEach(function (k) {
       var d = run.design_days[k], b = d.block;
       dd[k] = {key: k, kind: d.kind, total_w: b.total_w, sensible_w: b.sensible_w, latent_w: b.latent_w,
-        outdoor_air_w: b.outdoor_air_w, supply_air_m3s: b.supply_air_m3s, outdoor_air_m3s: b.outdoor_air_m3s,
+        outdoor_air_w: b.outdoor_air_w, heat_recovery_w: b.heat_recovery_w, supply_air_m3s: b.supply_air_m3s, outdoor_air_m3s: b.outdoor_air_m3s,
         sum_of_zone_peaks_w: d.sum_of_zone_peaks_w, time: b.time, outdoor_db_c: b.outdoor_db_c,
         profile: d.profile};
     });

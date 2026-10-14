@@ -90,6 +90,8 @@ class ResultsTests(unittest.TestCase):
                 tot: {'G_S IDEAL LOADS': [10, 50, 20], 'M_S IDEAL LOADS': [30, 10, 25]},
                 results.V_CLG_SEN: {'G_S IDEAL LOADS': [8, 40, 15], 'M_S IDEAL LOADS': [20, 8, 20]},
                 results.V_OAT: {'Environment': [30, 32, 34]},
+                results.V_OA_CLG: {'G_S IDEAL LOADS': [6, 9, 7], 'M_S IDEAL LOADS': [5, 2, 4]},
+                results.V_HR_CLG: {'G_S IDEAL LOADS': [2, 3, 2], 'M_S IDEAL LOADS': [1, 1, 1]},
             },
             'X ANN HTG 99.6% CONDNS DB': {
                 results.V_HTG_TOT: {'G_S IDEAL LOADS': [5, 7], 'M_S IDEAL LOADS': [4, 1]},
@@ -109,6 +111,11 @@ class ResultsTests(unittest.TestCase):
         self.assertAlmostEqual(c['block']['sensible_w'], 8 + 60)
         self.assertEqual(c['block']['time'], '00:10')
         self.assertEqual(c['block']['outdoor_db_c'], 30)
+        # Outdoor-air load (before recovery) and recovered amount at the block peak, scaled
+        self.assertAlmostEqual(c['block']['outdoor_air_w'], 6 + 15)
+        self.assertAlmostEqual(c['block']['heat_recovery_w'], 2 + 3)
+        # Missing variables come back as None rather than failing
+        self.assertIsNone(r['design_days']['htg_99.6']['block']['heat_recovery_w'])
         # Zone peaks: G_S 50*1, M_S 30*3
         self.assertAlmostEqual(c['sum_of_zone_peaks_w'], 50 + 90)
         h = r['design_days']['htg_99.6']

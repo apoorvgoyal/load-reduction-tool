@@ -170,6 +170,7 @@
       clg: c && c.total_w * cf, clgSens: c && c.sensible_w != null ? c.sensible_w * cf : null,
       clgLat: c && c.latent_w != null ? c.latent_w * cf : null,
       clgOA: c && c.outdoor_air_w != null ? c.outdoor_air_w : null, clgRaw: c && c.total_w,
+      clgHR: c && c.heat_recovery_w != null ? c.heat_recovery_w : null,
       clgSop: c && c.sum_of_zone_peaks_w != null ? c.sum_of_zone_peaks_w * cf : null,
       supply: c && c.supply_air_m3s, time: c && c.time, oat: c && c.outdoor_db_c, errC: c && c.err_pct,
       htg: h && h.total_w * hf, htgRaw: h && h.total_w,
@@ -323,8 +324,13 @@
         deltaHtml(cfm, b && b.supply != null ? b.supply * C.CFM_PER_M3S : null, function (v) { return fmt(v, 0) + ' cfm'; }) + '</div>';
     }
     if (g.clgOA != null && g.clgRaw) {
-      h += '<div class="kpi"><div class="kpi-label">Outdoor air share of cooling</div><div class="kpi-value">' + fmt(g.clgOA / g.clgRaw * 100, 0) + '<span class="kpi-unit">%</span></div>' +
-        '<div class="kpi-sec">' + fmt(g.clgOA / 1000, 0) + ' kW for ventilation air</div></div>';
+      // EnergyPlus reports the outdoor-air load before heat recovery; the
+      // recovered part is already netted out of the coil total.
+      var net = g.clgHR != null ? g.clgOA - g.clgHR : null;
+      h += '<div class="kpi"><div class="kpi-label">Ventilation air load</div><div class="kpi-value">' +
+        fmt((net != null ? net : g.clgOA) / 1000, 0) + '<span class="kpi-unit">kW' + (net != null ? ' net' : ' before recovery') + '</span></div>' +
+        '<div class="kpi-sec">' + fmt(g.clgOA / 1000, 0) + ' kW before heat recovery' +
+        (g.clgHR != null ? ' · ' + fmt(g.clgHR / 1000, 0) + ' kW recovered' : '') + '</div></div>';
     }
     return h + '</div>';
   }
@@ -343,7 +349,8 @@
     h += row('Cooling, block (tons)', g.clg, b && b.clg, tons, 1);
     h += row('Cooling, sensible (kW)', g.clgSens, b && b.clgSens, kw, 1);
     h += row('Cooling, latent (kW)', g.clgLat, b && b.clgLat, kw, 1);
-    h += row('Cooling, outdoor air portion (kW)', g.clgOA, b && b.clgOA, kw, 1);
+    h += row('Ventilation load before heat recovery (kW)', g.clgOA, b && b.clgOA, kw, 1);
+    h += row('Recovered by heat recovery (kW)', g.clgHR, b && b.clgHR, kw, 1);
     h += row('Cooling, sum of zone peaks (tons)', g.clgSop, b && b.clgSop, tons, 1);
     h += row('Supply air at cooling peak (cfm)', g.supply, b && b.supply, cfm, 0);
     h += row('Heating, block (MBH)', g.htg, b && b.htg, mbh, 0);

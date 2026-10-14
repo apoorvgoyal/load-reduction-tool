@@ -18,6 +18,11 @@ V_ZN_CLG = 'Zone Ideal Loads Zone Sensible Cooling Rate'
 V_ZN_HTG = 'Zone Ideal Loads Zone Sensible Heating Rate'
 V_OA_CLG = 'Zone Ideal Loads Outdoor Air Total Cooling Rate'
 V_OA_HTG = 'Zone Ideal Loads Outdoor Air Total Heating Rate'
+# The outdoor-air rates above are the ventilation load BEFORE heat recovery
+# (checked against hand calcs on the first real runs); the recovered amount
+# is reported separately and is already netted out of the supply-air totals.
+V_HR_CLG = 'Zone Ideal Loads Heat Recovery Total Cooling Rate'
+V_HR_HTG = 'Zone Ideal Loads Heat Recovery Total Heating Rate'
 V_SA_FLOW = 'Zone Ideal Loads Supply Air Standard Density Volume Flow Rate'
 V_OA_FLOW = 'Zone Ideal Loads Outdoor Air Standard Density Volume Flow Rate'
 V_OAT = 'Site Outdoor Air Drybulb Temperature'
@@ -102,6 +107,7 @@ def _parse(con, model):
             'latent_w': None if is_htg else at(V_CLG_LAT),
             'zone_sensible_w': at(V_ZN_HTG if is_htg else V_ZN_CLG),
             'outdoor_air_w': at(V_OA_HTG if is_htg else V_OA_CLG),
+            'heat_recovery_w': at(V_HR_HTG if is_htg else V_HR_CLG),
             'supply_air_m3s': at(V_SA_FLOW),
             'outdoor_air_m3s': at(V_OA_FLOW),
             'time': times[ti_peak][1],

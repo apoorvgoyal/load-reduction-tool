@@ -6,13 +6,20 @@ It is independent of the Total Carbon Tool: its own server, its own page, no sha
 
 ## Status
 
-> **The pipeline has not yet been run against a real EnergyPlus installation.** The environment it was built in could not download EnergyPlus. What has been verified so far:
+> **First real-EnergyPlus check (EnergyPlus 25.2, 20 office cases in Chicago, 1–15 floors, randomised inputs):** all runs completed with no severe errors and every output was read.
+>
+> - Peak heating (99.6% day: steady −20 °C, no sun, no internal gains) matched an independent steady-state hand calculation within −7.5% to +3.7%, mostly within ±3%. The hand calculation covered envelope conduction, F-factor slab, infiltration and ventilation with heat recovery.
+> - The outdoor-air output matched a hand calculation within 2% once it was understood to be the load *before* heat recovery. It is now labelled that way, with the recovered amount reported separately.
+> - Cooling outputs are internally consistent: sensible + latent = total, zone peaks ≥ block peak, percentile ordering holds, and the dew-point day governs in some humid-load cases.
+>
+> Still to do: compare cooling peaks against an independent reference (an existing Trace/HAP calc or an ASHRAE 140 case). Cooling depends on solar and thermal-mass timing, which a steady-state hand calc can't check.
+>
+> **Checks that don't need EnergyPlus** (run by the test suite):
 >
 > - Every generated model passes the EnergyPlus 25.2 input data dictionary check (via the OpenStudio 3.11 Python package). Field order, choices and numeric types are all checked, plus name-reference integrity.
 > - The results parser, scaling and peak arithmetic are tested against synthetic `eplusout.sql` files in the EnergyPlus schema.
 > - The runner → batch → fit → browser chain is tested end to end with a stand-in executable.
 >
-> **First step on a machine with EnergyPlus:** run one scenario, review `eplusout.err`, and check the results against a hand calculation or an existing Trace/HAP calc. Do this before training anything (see *Validation* below).
 
 ## Two ways to get a number
 
@@ -72,7 +79,7 @@ python3 engine/fit_surrogate.py                                                 
 - **Design days.** Taken verbatim from the station's `.ddy` file: heating 99.6% and 99%; cooling 0.4/1/2% dry-bulb with mean coincident wet-bulb; dehumidification 0.4/1/2% dew point with mean coincident dry-bulb. **Cooling is governed by whichever of the dry-bulb and dew-point days gives the larger total.**
 - **Outputs.**
   - Block (coincident) peak and sum of zone peaks.
-  - Sensible and latent loads, the outdoor-air portion, and supply airflow at peak.
+  - Sensible and latent loads, the ventilation (outdoor-air) load before heat recovery and the amount recovered, and supply airflow at peak. The coil totals already include the recovery credit.
   - Peak time and the 24-hour profile.
   - EnergyPlus's zone component load summary and zone sizing table.
   - The IDF, for anyone who wants to inspect or rerun it.

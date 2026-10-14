@@ -35,7 +35,9 @@ def targets(design_days, gfa):
         if b.get('latent_w') is not None:
             out[key + '|latent_w_m2'] = b['latent_w'] / gfa
         if b.get('outdoor_air_w') is not None:
-            out[key + '|oa_w_m2'] = b['outdoor_air_w'] / gfa
+            out[key + '|oa_w_m2'] = b['outdoor_air_w'] / gfa          # before heat recovery
+        if b.get('heat_recovery_w') is not None:
+            out[key + '|hr_w_m2'] = b['heat_recovery_w'] / gfa
         if b.get('supply_air_m3s') is not None:
             out[key + '|supply_ls_m2'] = b['supply_air_m3s'] * 1000.0 / gfa
         out[key + '|sum_of_peaks_w_m2'] = dd['sum_of_zone_peaks_w'] / gfa

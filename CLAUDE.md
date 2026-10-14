@@ -55,4 +55,5 @@ python3 -m unittest discover -s engine/tests -t engine
   - Don't show surrogate output when a fixed input has changed (`fixed_inputs` in `variables.json`).
   - Sizing factors stay explicit and default to 1.0.
 - **Middle-floor scaling** is done in `engine/lib/results.py` with the model's per-zone `scale`, not with EnergyPlus zone multipliers. Keep it that way so the scaling stays auditable.
-- **Status:** the pipeline has not yet been validated against a real EnergyPlus run (see the README Status section). Treat the first real runs as validation, not production.
+- **Status:** heating peaks are validated against hand calcs on real EnergyPlus 25.2 runs; cooling peaks are not yet checked against an independent reference (README Status section). Treat results as validation-stage, not production.
+- **Outdoor-air outputs** (`Zone Ideal Loads Outdoor Air ...`) are the load before heat recovery; recovery is reported separately (`heat_recovery_w`) and is already netted out of the supply-air totals. Don't add or subtract it from the totals again.
