@@ -15,6 +15,7 @@ import json
 import os
 import random
 import sys
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -84,6 +85,11 @@ def _work(args):
     return i, user, rec, None
 
 
+def _hms(sec):
+    sec = int(round(sec))
+    return '%d:%02d:%02d' % (sec // 3600, sec % 3600 // 60, sec % 60)
+
+
 def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument('--types', required=True)
@@ -116,6 +122,7 @@ def main(argv):
                 continue
             failed_path = path.replace('.jsonl', '.failed.jsonl')
             n_ok = n_bad = 0
+            t0 = time.time()
             with ProcessPoolExecutor(max_workers=a.workers) as pool, open(path, 'a') as ok_f:
                 futs = [pool.submit(_work, t) for t in todo]
                 for k, fut in enumerate(as_completed(futs), 1):
@@ -130,9 +137,13 @@ def main(argv):
                             bad_f.write(json.dumps({'id': i, 'user': user, 'error': err}) + '\n')
                         n_bad += 1
                     if k % 25 == 0:
-                        print('  %d/%d' % (k, len(todo)), flush=True)
-            print('  finished: %d ok, %d failed%s' % (n_ok, n_bad, (' (see %s)' % failed_path) if n_bad else ''),
-                  flush=True)
+                        el = time.time() - t0
+                        print('  %d/%d  %s elapsed, about %s left' % (
+                            k, len(todo), _hms(el), _hms(el / k * (len(todo) - k))), flush=True)
+            el = time.time() - t0
+            print('  finished: %d ok, %d failed in %s (%.1f s per run)%s' % (
+                n_ok, n_bad, _hms(el), el / max(1, len(todo)),
+                (' - see %s' % failed_path) if n_bad else ''), flush=True)
 
 
 if __name__ == '__main__':
