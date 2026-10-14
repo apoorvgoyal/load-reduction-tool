@@ -33,7 +33,7 @@ python3 -m unittest discover -s engine/tests -t engine
   echo '{"type":"office","station":"chicago","gfa_m2":10000,"n_floors":4}' | python3 engine/run_scenario.py - | python3 -m json.tool | head -40
   ```
   Check that `messages.severe` is 0 and `messages.fatal` is empty. Add `--keep DIR` to inspect `eplusout.err`.
-- **UI check:** `node --check web/app.js web/core.js server.js`, then load the page. It must work at 390 px width without horizontal scroll.
+- **UI check:** `node --check web/app.js && node --check web/core.js && node --check server.js`, then load the page. It must work at 390 px width without horizontal scroll.
 
 ## Regenerated files (don't hand-edit)
 
