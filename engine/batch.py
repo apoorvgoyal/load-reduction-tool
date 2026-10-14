@@ -7,7 +7,8 @@ Usage:
 Output: engine/runs/<type>__<station>.jsonl, one line per completed sample:
   {"id": 17, "scenario": {...}, "features": [...], "targets": {...}, "eplus": "..."}
 Runs are resumable: samples already in the file are skipped. Failed samples are
-written to <type>__<station>.failed.jsonl with the error.
+written to <type>__<station>.failed.jsonl with the error; that file only exists
+if something failed.
 """
 import argparse
 import json
@@ -113,19 +114,25 @@ def main(argv):
             print('%s/%s: %d done, %d to run' % (btype, station, len(done), len(todo)), flush=True)
             if not todo:
                 continue
-            with ProcessPoolExecutor(max_workers=a.workers) as pool, \
-                    open(path, 'a') as ok_f, open(path.replace('.jsonl', '.failed.jsonl'), 'a') as bad_f:
+            failed_path = path.replace('.jsonl', '.failed.jsonl')
+            n_ok = n_bad = 0
+            with ProcessPoolExecutor(max_workers=a.workers) as pool, open(path, 'a') as ok_f:
                 futs = [pool.submit(_work, t) for t in todo]
                 for k, fut in enumerate(as_completed(futs), 1):
                     i, user, rec, err = fut.result()
                     if rec:
                         ok_f.write(json.dumps(rec) + '\n')
                         ok_f.flush()
+                        n_ok += 1
                     else:
-                        bad_f.write(json.dumps({'id': i, 'user': user, 'error': err}) + '\n')
-                        bad_f.flush()
+                        # Only created when something actually fails.
+                        with open(failed_path, 'a') as bad_f:
+                            bad_f.write(json.dumps({'id': i, 'user': user, 'error': err}) + '\n')
+                        n_bad += 1
                     if k % 25 == 0:
                         print('  %d/%d' % (k, len(todo)), flush=True)
+            print('  finished: %d ok, %d failed%s' % (n_ok, n_bad, (' (see %s)' % failed_path) if n_bad else ''),
+                  flush=True)
 
 
 if __name__ == '__main__':
