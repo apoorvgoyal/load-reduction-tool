@@ -83,7 +83,9 @@ def fit_file(path, k=5, min_samples=100):
         recs = [json.loads(l) for l in f if l.strip()]
     if len(recs) < min_samples:
         return None, '%d samples < %d' % (len(recs), min_samples)
-    Xraw = np.array([r['features'] for r in recs], float)
+    # Features are recomputed from each saved scenario, so a change to the
+    # feature set only needs a refit, not new EnergyPlus runs.
+    Xraw = np.array([features.features(r['scenario']) for r in recs], float)
     mean = Xraw.mean(0)
     std = Xraw.std(0)
     std[std == 0] = 1.0

@@ -66,13 +66,27 @@
       ['heating_sizing_factor', 'Heating sizing factor', '-', 0.05]]}
   ];
 
+  // Names for surrogate features (used in out-of-range warnings).
   var FEATURE_LABELS = {
+    ext_wall_m2_per_m2: 'Exterior wall area per floor area', window_m2_per_m2: 'Window area per floor area',
+    wall_ua_per_m2: 'Opaque wall UA per floor area', window_ua_per_m2: 'Window UA per floor area',
+    roof_ua_per_m2: 'Roof UA per floor area', slab_fp_per_m2: 'Slab F×perimeter per floor area',
+    infiltration_m3h_per_m2: 'Infiltration per floor area', solar_aperture_per_m2: 'Solar aperture (SHGC × window) per floor area',
+    shaded_aperture_per_m2: 'Overhang-shaded aperture', oa_ls_m2: 'Outdoor air L/s·m²',
+    oa_after_sensible_hr: 'Outdoor air after sensible recovery', oa_after_latent_hr: 'Outdoor air after latent recovery',
+    lpd_w_m2: 'Lighting W/m²', epd_w_m2: 'Equipment W/m²', people_per_m2: 'Occupant density',
+    t_cool_c: 'Cooling setpoint', t_heat_c: 'Heating setpoint', core_fraction: 'Core fraction of floor plate',
+    orient_cos2: 'Orientation', orient_sin2: 'Orientation', aspect_ratio: 'Aspect ratio'
+  };
+
+  // Design inputs swept in the sensitivity chart, over the trained design space.
+  var SWEEP_LABELS = {
     wwr: 'Window-to-wall ratio', wall_u: 'Wall U', roof_u: 'Roof U', win_u: 'Window U', shgc: 'SHGC',
-    overhang_pf: 'Overhang PF', people_per_m2: 'Occupant density', lpd_w_m2: 'Lighting W/m²',
-    epd_w_m2: 'Equipment W/m²', oa_ls_m2: 'Outdoor air L/s·m²', erv_sensible_eff: 'ERV sensible eff.',
+    overhang_pf: 'Overhang PF', m2_per_person: 'Area per person', lpd_w_m2: 'Lighting W/m²',
+    epd_w_m2: 'Equipment W/m²', oa_multiplier: 'Outdoor air (× 62.1 rate)', erv_sensible_eff: 'ERV sensible eff.',
     erv_latent_eff: 'ERV latent eff.', infiltration_ach: 'Infiltration ACH', t_cool_c: 'Cooling setpoint',
-    t_heat_c: 'Heating setpoint', n_floors: 'Floors', aspect_ratio: 'Aspect ratio',
-    floor_plate_m2: 'Floor plate m²', north_axis_fold: 'Orientation'
+    t_heat_c: 'Heating setpoint', n_floors: 'Floors (same GFA)', aspect_ratio: 'Aspect ratio',
+    north_axis_deg: 'Orientation (0° vs 90°)'
   };
 
   var DD_LABEL = {
@@ -155,6 +169,7 @@
     var m = SUR[sc.type + '|' + sc.station];
     if (!m) return {source: 'none', reason: 'no-model'};
     var r = C.surrogateResult(m, sc);
+    if (r.incompatible) return {source: 'none', reason: 'incompatible'};
     if (r.fixedDiffs.length) return {source: 'none', reason: 'fixed', fixedDiffs: r.fixedDiffs};
     return r;
   }
@@ -382,28 +397,47 @@
     if (!m || !g || !g.cKey) return '';
     var out = g.cKey + '|total_w_m2';
     if (!m.outputs[out]) return '';
-    var x0 = C.features(S.sc), base = C.predictFeatures(m, x0, out);
-    var conv = S.sc.gfa_m2 / 1000 / C.KW_PER_TON * S.sc.cooling_sizing_factor;
-    var rows = C.FEATURES.map(function (f, i) {
-      var lo = x0.slice(), hi = x0.slice();
-      lo[i] = m.feature_min[i]; hi[i] = m.feature_max[i];
-      var dl = (C.predictFeatures(m, lo, out) - base) * conv, dh = (C.predictFeatures(m, hi, out) - base) * conv;
-      return {f: f, lo: m.feature_min[i], hi: m.feature_max[i], dl: dl, dh: dh, span: Math.abs(dh - dl)};
-    }).sort(function (a, b) { return b.span - a.span; }).slice(0, 10);
+    var space = D.design_space.sampled, sc0 = S.sc, def = S.defaults;
+    var base = C.predict(m, sc0).perM2[out];
+    var conv = sc0.gfa_m2 / 1000 / C.KW_PER_TON * sc0.cooling_sizing_factor;
+    function at(key, v) {
+      var sc = JSON.parse(JSON.stringify(sc0));
+      if (key === 'oa_multiplier') {
+        sc.oa_per_person_ls = def.oa_per_person_ls * v; sc.oa_per_area_ls_m2 = def.oa_per_area_ls_m2 * v;
+      } else sc[key] = v;
+      return (C.predict(m, sc).perM2[out] - base) * conv;
+    }
+    var rows = [];
+    Object.keys(space).forEach(function (key) {
+      var sp = space[key], lo, hi;
+      if (key === 'floor_plate_m2') return;            // covered by "Floors (same GFA)"
+      if (key === 'north_axis_deg') { lo = 0; hi = 90; }
+      else if (key === 'n_floors') {
+        lo = Math.max(sp.min, Math.ceil(sc0.gfa_m2 / space.floor_plate_m2.max));
+        hi = Math.min(sp.max, Math.floor(sc0.gfa_m2 / space.floor_plate_m2.min));
+        if (hi <= lo) return;
+      } else if (sp.scale_of_default) { lo = def[key] * sp.scale_of_default[0]; hi = def[key] * sp.scale_of_default[1]; }
+      else { lo = sp.min; hi = sp.max; }
+      var dl = at(key, lo), dh = at(key, hi);
+      rows.push({key: key, lo: lo, hi: hi, dl: dl, dh: dh, span: Math.abs(dh - dl)});
+    });
+    rows = rows.sort(function (a, b) { return b.span - a.span; }).slice(0, 10);
     var mx = Math.max.apply(null, rows.map(function (r) { return Math.max(Math.abs(r.dl), Math.abs(r.dh)); })) || 1;
-    var h = '<div class="card"><h2>What moves the cooling peak</h2><p class="sub">Change in block cooling (tons) when one input moves to the low or high end of the trained range, others held at current values. From the surrogate; confirm decisions with an EnergyPlus run.</p><div class="tornado">';
+    var h = '<div class="card"><h2>What moves the cooling peak</h2><p class="sub">Change in block cooling (tons) when one design input moves to the low or high end of the trained range, all others held at current values. From the surrogate; confirm decisions with an EnergyPlus run.</p><div class="tornado">';
     rows.forEach(function (r) {
       function bar(d) {
         var w = Math.abs(d) / mx * 50, left = d < 0 ? 50 - w : 50;
         return '<div class="bar ' + (d < 0 ? 'neg' : 'pos') + '" style="left:' + left + '%;width:' + w + '%"></div>';
       }
-      h += '<div title="' + esc(FEATURE_LABELS[r.f]) + ': ' + fmt(r.lo, 2) + ' → ' + fmt(r.hi, 2) + '">' + esc(FEATURE_LABELS[r.f]) +
-        ' <span style="color:var(--ink-4)">' + fmt(r.lo, 2) + '–' + fmt(r.hi, 2) + '</span></div>' +
+      var dp = r.key === 'n_floors' ? 0 : 2;
+      h += '<div title="' + esc(SWEEP_LABELS[r.key]) + ': ' + fmt(r.lo, dp) + ' → ' + fmt(r.hi, dp) + '">' + esc(SWEEP_LABELS[r.key]) +
+        ' <span style="color:var(--ink-4)">' + fmt(r.lo, dp) + '–' + fmt(r.hi, dp) + '</span></div>' +
         '<div class="bar-wrap"><div class="axis"></div>' + bar(r.dl) + bar(r.dh) + '</div>' +
         '<div class="num" style="text-align:right">' + fmt(r.span, 1) + '</div>';
     });
-    return h + '</div><p class="sub" style="margin-top:8px">Green = lower peak, red = higher. Right column: total swing (tons).</p></div>';
+    return h + '</div><p class="sub" style="margin-top:8px">Bars show the low end and the high end of each input. Green = lower peak, red = higher. Right column: total swing (tons).</p></div>';
   }
+
 
   function profileSvg(profile, color, label) {
     if (!profile || !profile.length) return '';
@@ -497,7 +531,10 @@
       h += kpisCard(g, b) + compareTable(g, b);
     } else {
       h += '<div class="empty">';
-      if (res.reason === 'fixed') {
+      if (res.reason === 'incompatible') {
+        h += 'The trained surrogate for this building type and station was fitted by an older version of the tool.<br>' +
+          'Re-run <code>py engine/fit_surrogate.py</code> (no new EnergyPlus runs needed), then reload this page.';
+      } else if (res.reason === 'fixed') {
         h += 'The surrogate was trained with these inputs held fixed, and you have changed them: ' + res.fixedDiffs.map(function (d) {
           return '<b>' + esc(d.input) + '</b> (trained ' + esc(d.trained === null ? 'none' : d.trained) + ', now ' + esc(d.value === null ? 'none' : d.value) + ')';
         }).join(', ') + '.<br>Run EnergyPlus for this scenario.';

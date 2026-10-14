@@ -8,10 +8,12 @@
   var CFM_PER_M3S = 2118.88;
   var FT2_PER_M2 = 10.7639;
 
-  var FEATURES = ['wwr', 'wall_u', 'roof_u', 'win_u', 'shgc', 'overhang_pf',
-    'people_per_m2', 'lpd_w_m2', 'epd_w_m2', 'oa_ls_m2',
-    'erv_sensible_eff', 'erv_latent_eff', 'infiltration_ach',
-    't_cool_c', 't_heat_c', 'n_floors', 'aspect_ratio', 'floor_plate_m2', 'north_axis_fold'];
+  var FEATURES = [
+    'ext_wall_m2_per_m2', 'window_m2_per_m2', 'wall_ua_per_m2', 'window_ua_per_m2', 'roof_ua_per_m2',
+    'slab_fp_per_m2', 'infiltration_m3h_per_m2', 'solar_aperture_per_m2', 'shaded_aperture_per_m2',
+    'oa_ls_m2', 'oa_after_sensible_hr', 'oa_after_latent_hr',
+    'lpd_w_m2', 'epd_w_m2', 'people_per_m2', 't_cool_c', 't_heat_c', 'core_fraction',
+    'orient_cos2', 'orient_sin2', 'aspect_ratio'];
 
   // Placeholders for project geometry with no standard default (scenario.py).
   var PLACEHOLDERS = {gfa_m2: 10000, n_floors: 4, aspect_ratio: 1.5, north_axis_deg: 0, overhang_pf: 0,
@@ -45,13 +47,22 @@
     return {scenario: sc, provenance: prov, verify: verify};
   }
 
+  // Physics-shaped features per m2 of floor area (see engine/lib/features.py).
   function features(sc) {
+    var n = +sc.n_floors, gfa = sc.gfa_m2, h = sc.floor_to_floor_m;
+    var a = gfa / n, length = Math.sqrt(a * sc.aspect_ratio), width = a / length;
+    var perim = 2 * (length + width), ew = perim * h * n / gfa;
     var ppl = 1 / sc.m2_per_person;
-    var ax = ((sc.north_axis_deg % 180) + 180) % 180;
-    return [sc.wwr, sc.wall_u, sc.roof_u, sc.win_u, sc.shgc, sc.overhang_pf,
-      ppl, sc.lpd_w_m2, sc.epd_w_m2, sc.oa_per_person_ls * ppl + sc.oa_per_area_ls_m2,
-      sc.erv_sensible_eff, sc.erv_latent_eff, sc.infiltration_ach,
-      sc.t_cool_c, sc.t_heat_c, +sc.n_floors, sc.aspect_ratio, sc.gfa_m2 / sc.n_floors, ax];
+    var oa = sc.oa_per_person_ls * ppl + sc.oa_per_area_ls_m2;
+    var d = sc.perimeter_depth_m;
+    var core = Math.max(0, width - 2 * d) * Math.max(0, length - 2 * d) / a;
+    var th = sc.north_axis_deg * Math.PI / 180;
+    var aperture = sc.shgc * sc.wwr * ew;
+    return [ew, sc.wwr * ew, sc.wall_u * (1 - sc.wwr) * ew, sc.win_u * sc.wwr * ew, sc.roof_u / n,
+      sc.slab_f_factor_w_mk * perim / gfa, sc.infiltration_ach * h, aperture, aperture * sc.overhang_pf,
+      oa, oa * (1 - sc.erv_sensible_eff), oa * (1 - sc.erv_latent_eff),
+      sc.lpd_w_m2, sc.epd_w_m2, ppl, sc.t_cool_c, sc.t_heat_c, core,
+      Math.cos(2 * th), Math.sin(2 * th), sc.aspect_ratio];
   }
 
   function expand(z) {
@@ -71,6 +82,9 @@
 
   // Evaluate a fitted model. Returns per-m2 outputs plus applicability flags.
   function predict(model, sc) {
+    if (JSON.stringify(model.features) !== JSON.stringify(FEATURES)) {
+      return {perM2: {}, extrapolated: [], fixedDiffs: [], incompatible: true};
+    }
     var x = features(sc), z = [], i;
     var extrap = [];
     for (i = 0; i < x.length; i++) {
@@ -98,10 +112,14 @@
   // Convert surrogate per-m2 outputs into the common result shape.
   function surrogateResult(model, sc, factors) {
     var p = predict(model, sc), dd = {}, gfa = sc.gfa_m2;
+    var noRecovery = !(sc.erv_sensible_eff > 0) && !(sc.erv_latent_eff > 0);
     Object.keys(p.perM2).forEach(function (name) {
       var parts = name.split('|'), key = parts[0], metric = parts[1];
       var r = dd[key] || (dd[key] = {key: key, kind: key.indexOf('htg') === 0 ? 'heating' : 'cooling'});
-      var v = p.perM2[name], err = model.outputs[name].cv.p95_abs_pct;
+      // Loads can't be negative; with no heat recovery the recovered amount is
+      // exactly zero (otherwise the fit's noise around zero would show).
+      var v = Math.max(0, p.perM2[name]), err = model.outputs[name].cv.p95_abs_pct;
+      if (metric === 'hr_w_m2' && noRecovery) v = 0;
       if (metric === 'total_w_m2') { r.total_w = v * gfa; r.err_pct = err; }
       else if (metric === 'sensible_w_m2') r.sensible_w = v * gfa;
       else if (metric === 'latent_w_m2') r.latent_w = v * gfa;
@@ -111,6 +129,7 @@
       else if (metric === 'sum_of_peaks_w_m2') r.sum_of_zone_peaks_w = v * gfa;
     });
     return {source: 'surrogate', gfa: gfa, dd: dd, extrapolated: p.extrapolated, fixedDiffs: p.fixedDiffs,
+      incompatible: !!p.incompatible,
       model: {n: model.n_samples, eplus: model.eplus_versions, fitted: model.fitted_at}};
   }
 

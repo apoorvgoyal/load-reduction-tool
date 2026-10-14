@@ -81,7 +81,8 @@ def _work(args):
     rec = {'id': i, 'scenario': sc, 'features': features.features(sc),
            'targets': features.targets(r['design_days'], sc['gfa_m2']),
            'eplus': r['engine']['version'], 'warnings': r['messages']['warnings'],
-           'severe': r['messages']['severe']}
+           'severe': r['messages']['severe'],
+           'severe_messages': r['messages'].get('severe_messages', [])[:5]}
     return i, user, rec, None
 
 

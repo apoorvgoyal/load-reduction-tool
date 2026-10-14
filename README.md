@@ -12,6 +12,9 @@ It is independent of the Total Carbon Tool: its own server, its own page, no sha
 > - The outdoor-air output matched a hand calculation within 2% once it was understood to be the load *before* heat recovery. It is now labelled that way, with the recovered amount reported separately.
 > - Cooling outputs are internally consistent: sensible + latent = total, zone peaks ≥ block peak, percentile ordering holds, and the dew-point day governs in some humid-load cases.
 >
+> - **Surrogate on 500 real runs (office, Chicago):** worst out-of-fold P95 error on block totals is 4.2%: heating about 1%, cooling 3–4%. This uses the physics-shaped features in `engine/lib/features.py`; the earlier raw-input features gave 10.9%. Latent load alone is about ±1.4 W/m² (RMSE), which reads as a large percentage because latent loads are small.
+> - **Open issue:** 62 of the 500 runs reported a severe EnergyPlus error. All of them had 3+ floors, and almost all had floor plates over 4,000 m². Their heating results match the hand calc as well as the clean runs do, so they were kept. The likely cause is warm-up non-convergence in the large, fully adiabatic middle-floor core zone, but this is unconfirmed. Reproduce with `engine/diagnostics/large_floor_plate.json` (see *Diagnostics*). Batch records now keep the first severe messages.
+>
 > Still to do: compare cooling peaks against an independent reference (an existing Trace/HAP calc or an ASHRAE 140 case). Cooling depends on solar and thermal-mass timing, which a steady-state hand calc can't check.
 >
 > **Checks that don't need EnergyPlus** (run by the test suite):
@@ -64,6 +67,16 @@ python3 engine/fit_surrogate.py                                                 
 - The fit is a quadratic ridge regression on 19 features. Ridge strength is chosen by 5-fold cross-validation, and the error statistics stored with each model are out-of-fold.
 - Plan roughly 400–600 runs per building type × station. Check the reported P95 error before relying on a model; if it is poor, add samples or narrow the design space.
 - Failed runs go to `engine/runs/*.failed.jsonl`. Samples with severe EnergyPlus errors are counted in the model metadata.
+
+## Diagnostics
+
+`engine/diagnostics/large_floor_plate.json` is one of the training cases that raised a severe EnergyPlus error. To see the message:
+
+```
+py engine/run_scenario.py engine/diagnostics/large_floor_plate.json --keep diag1 > diag1.json
+```
+
+Then open `diag1\eplusout.err` and look for the `** Severe  **` lines.
 
 ## What the model is
 
