@@ -31,19 +31,23 @@ The surrogate is only used when the scenario is inside what it was trained on. I
 # 1. EnergyPlus 24.x/25.x from https://energyplus.net (any OS). Check:
 energyplus --version            # or set ENERGYPLUS_EXE=/path/to/energyplus
 
-# 2. Run the tool (Node 18+, Python 3.9+, no packages needed for this step)
-cd peak-load-tool
-node server.js                  # http://localhost:3100
+# 2. Run the tool (Python 3.9+ only, no packages needed for this step)
+cd load-reduction-tool
+python server.py                # opens http://localhost:3100 in your browser; Ctrl+C to stop
 ```
 
-Opening `web/index.html` directly (without the server) still shows the design conditions and any trained surrogate; EnergyPlus runs need the server.
+On Windows, use `py` if `python` isn't recognized. Setting the EnergyPlus path in Command Prompt:
+`set ENERGYPLUS_EXE=C:\EnergyPlusV25-2-0\energyplus.exe` (adjust to your install), then `py server.py`.
 
-Server environment variables: `PORT` (3100), `ENERGYPLUS_EXE`, `LOADS_PYTHON` (python3), `LOADS_MAX_CONCURRENT` (2), `LOADS_EPLUS_TIMEOUT` (300 s).
+`node server.js` is an equivalent server if you prefer Node (it also needs `LOADS_PYTHON` when Python isn't `python3`).
+
+Opening `web/index.html` directly (without a server) still shows the design conditions and any trained surrogate; EnergyPlus runs need a server.
+
+Server environment variables: `PORT` (3100), `ENERGYPLUS_EXE`, `LOADS_MAX_CONCURRENT` (2), `LOADS_EPLUS_TIMEOUT` (300 s); `server.js` also reads `LOADS_PYTHON` (python3).
 
 ## Training the surrogate (option B)
 
 ```bash
-cd peak-load-tool
 pip install numpy
 python3 engine/batch.py --types office --stations chicago --n 500 --workers 8   # resumable
 python3 engine/fit_surrogate.py                                                    # writes web/data/loads-surrogate.js
@@ -104,8 +108,9 @@ Envelope defaults by climate zone were carried over from the Total Carbon Tool a
 ## Layout
 
 ```
-peak-load-tool/
-  server.js                 static server + /api/engine, /api/run
+load-reduction-tool/
+  server.py                 server (Python stdlib): web/ + /api/engine, /api/run
+  server.js                 same server in Node (optional alternative)
   web/                      index.html, app.js (UI), core.js (pure logic, also used by tests), styles.css
   web/data/loads-data.js    stations + design conditions, defaults, design space (built by engine/build_data.py)
   web/data/loads-surrogate.js  trained models (built by engine/fit_surrogate.py; absent until trained)

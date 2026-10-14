@@ -1,11 +1,11 @@
 # CLAUDE.md
 
-Peak Load Tool: heating/cooling design loads on ASHRAE design days, calculated with EnergyPlus (`engine/`), served by a small Node server (`server.js`) to a vanilla-JS page (`web/`). See `README.md` for the methodology and limitations.
+Peak Load Tool: heating/cooling design loads on ASHRAE design days, calculated with EnergyPlus (`engine/`), served by a small server to a vanilla-JS page (`web/`). `server.py` (Python stdlib, the default) and `server.js` (Node) are equivalent; keep their endpoints and behaviour in sync. See `README.md` for the methodology and limitations.
 
 ## Setup
 
-- **Node 18+** for the server. No npm packages.
-- **Python 3.9+** for the engine. The runner and server need only the standard library.
+- **Python 3.9+** for the engine and the default server (`server.py`). Standard library only.
+- **Node 18+** only for `server.js` and the parity tests. No npm packages.
 - **EnergyPlus 24.x/25.x** for real runs: on `PATH` as `energyplus`, or set `ENERGYPLUS_EXE=/path/to/energyplus`. The IDF `Version` is taken from `energyplus --version`.
 - **Optional:**
   - `numpy`: surrogate fitting (`engine/fit_surrogate.py`) and its tests.
@@ -15,7 +15,8 @@ Peak Load Tool: heating/cooling design loads on ASHRAE design days, calculated w
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install numpy openstudio        # openstudio wheel is ~80 MB; it bundles the EnergyPlus IDD, not the engine
-node server.js                      # http://localhost:3100  (PORT, ENERGYPLUS_EXE, LOADS_PYTHON, LOADS_MAX_CONCURRENT, LOADS_EPLUS_TIMEOUT)
+python3 server.py --no-browser      # http://localhost:3100  (PORT, ENERGYPLUS_EXE, LOADS_MAX_CONCURRENT, LOADS_EPLUS_TIMEOUT)
+node server.js                      # same, Node edition (also reads LOADS_PYTHON)
 ```
 
 ## Tests
@@ -33,7 +34,7 @@ python3 -m unittest discover -s engine/tests -t engine
   echo '{"type":"office","station":"chicago","gfa_m2":10000,"n_floors":4}' | python3 engine/run_scenario.py - | python3 -m json.tool | head -40
   ```
   Check that `messages.severe` is 0 and `messages.fatal` is empty. Add `--keep DIR` to inspect `eplusout.err`.
-- **UI check:** `node --check web/app.js && node --check web/core.js && node --check server.js`, then load the page. It must work at 390 px width without horizontal scroll.
+- **UI check:** `node --check web/app.js && node --check web/core.js && node --check server.js`, then load the page via `python3 server.py`. It must work at 390 px width without horizontal scroll.
 
 ## Regenerated files (don't hand-edit)
 
