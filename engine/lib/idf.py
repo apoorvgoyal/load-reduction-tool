@@ -213,10 +213,14 @@ def build(sc, ddy, stat, eplus_version='25.2'):
         ('Name', 'Load tool %s' % sc['type']),
         ('North Axis', float(sc['north_axis_deg'])),
         ('Terrain', 'Suburbs'),
-        ('Loads Convergence Tolerance Value', 0.04),
+        # Warm-up load tolerance is an absolute value in W per zone. The 0.04 W
+        # default failed on large, fully adiabatic middle-floor core zones
+        # (observed 0.127 W day-to-day change on a ~3,000 m2 core: negligible).
+        # 0.5 W is the IDD maximum; 50 days gives heavy cores more room.
+        ('Loads Convergence Tolerance Value', 0.5),
         ('Temperature Convergence Tolerance Value', 0.4),
         ('Solar Distribution', 'FullInteriorAndExterior'),
-        ('Maximum Number of Warmup Days', 25),
+        ('Maximum Number of Warmup Days', 50),
         ('Minimum Number of Warmup Days', 6)])
     w.add('Timestep', [('Number of Timesteps per Hour', 6)])
     w.add('GlobalGeometryRules', [
