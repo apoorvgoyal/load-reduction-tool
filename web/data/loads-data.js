@@ -2226,6 +2226,11 @@ var LOADS_DATA = {
      "value": 10,
      "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.office.occ_h",
      "verify": true
+    },
+    "oa_ach": {
+     "value": 0.0,
+     "source": "Not used for this type: outdoor air is set by the ASHRAE 62.1 rates (Rp, Ra)",
+     "verify": false
     }
    },
    "school": {
@@ -2275,6 +2280,11 @@ var LOADS_DATA = {
      "value": 9,
      "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.school.occ_h",
      "verify": true
+    },
+    "oa_ach": {
+     "value": 0.0,
+     "source": "Not used for this type: outdoor air is set by the ASHRAE 62.1 rates (Rp, Ra)",
+     "verify": false
     }
    },
    "retail": {
@@ -2324,10 +2334,15 @@ var LOADS_DATA = {
      "value": 12,
      "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.retail.occ_h",
      "verify": true
+    },
+    "oa_ach": {
+     "value": 0.0,
+     "source": "Not used for this type: outdoor air is set by the ASHRAE 62.1 rates (Rp, Ra)",
+     "verify": false
     }
    },
    "hotel": {
-    "label": "Hotel (guestroom floors)",
+    "label": "Hospitality / hotel (guestroom floors)",
     "space_type_basis": "ASHRAE 62.1-2019 Table 6-1 'Bedroom/living room' (hotels) applied to the whole floor plate; modelled as occupied 24 h - conservative",
     "oa_per_person_ls": {
      "value": 2.5,
@@ -2373,36 +2388,320 @@ var LOADS_DATA = {
      "value": 24,
      "source": "Assumption: continuously occupied (conservative for sizing)",
      "verify": true
+    },
+    "oa_ach": {
+     "value": 0.0,
+     "source": "Not used for this type: outdoor air is set by the ASHRAE 62.1 rates (Rp, Ra)",
+     "verify": false
+    }
+   },
+   "higher_ed": {
+    "label": "Higher education (teaching)",
+    "space_type_basis": "ASHRAE 62.1-2019 Table 6-1 'Lecture classroom' rates; occupant density blended for the whole building (carried over) rather than the 62.1 lecture-classroom default, which assumes every m2 is seating",
+    "oa_per_person_ls": {
+     "value": 3.8,
+     "source": "ASHRAE 62.1-2019 Table 6-1, Lecture classroom Rp = 7.5 cfm/person",
+     "verify": false
+    },
+    "oa_per_area_ls_m2": {
+     "value": 0.3,
+     "source": "ASHRAE 62.1-2019 Table 6-1, Lecture classroom Ra = 0.06 cfm/ft2",
+     "verify": false
+    },
+    "oa_ach": {
+     "value": 0.0,
+     "source": "Not used for this type: outdoor air is set by the ASHRAE 62.1 rates (Rp, Ra)",
+     "verify": false
+    },
+    "m2_per_person": {
+     "value": 7.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.highedu.occ_dens (blended building density)",
+     "verify": true
+    },
+    "lpd_w_m2": {
+     "value": 7.75,
+     "source": "ASHRAE 90.1-2019 Table 9.5.1 Building Area Method, School/University 0.72 W/ft2",
+     "verify": true
+    },
+    "epd_w_m2": {
+     "value": 15.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.highedu.epd (unsourced there)",
+     "verify": true
+    },
+    "t_heat_c": {
+     "value": 21.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.highedu",
+     "verify": true
+    },
+    "t_cool_c": {
+     "value": 24.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.highedu",
+     "verify": true
+    },
+    "occ_start_h": {
+     "value": 8,
+     "source": "Assumption (occupied-period start hour)",
+     "verify": true
+    },
+    "occ_hours": {
+     "value": 12,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.highedu.occ_h",
+     "verify": true
+    }
+   },
+   "lab": {
+    "label": "Laboratory (research)",
+    "space_type_basis": "Outdoor air set by an air-change rate (exhaust-driven, once-through). Check that it meets ASHRAE 62.1-2019 University/college laboratories: Rp 10 cfm/person, Ra 0.18 cfm/ft2. Fume-hood exhaust beyond this rate is not modelled",
+    "oa_per_person_ls": {
+     "value": 0.0,
+     "source": "Not used: laboratory outdoor air is set by oa_ach",
+     "verify": false
+    },
+    "oa_per_area_ls_m2": {
+     "value": 0.0,
+     "source": "Not used: laboratory outdoor air is set by oa_ach",
+     "verify": false
+    },
+    "oa_ach": {
+     "value": 6.0,
+     "source": "Common occupied-laboratory design minimum (6 air changes per hour of outdoor air); a design choice, not a code requirement - set per lab program and hood count",
+     "verify": true
+    },
+    "m2_per_person": {
+     "value": 15.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.lab.occ_dens",
+     "verify": true
+    },
+    "lpd_w_m2": {
+     "value": 14.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.lab.lpd",
+     "verify": true
+    },
+    "epd_w_m2": {
+     "value": 50.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.lab.epd (unsourced there)",
+     "verify": true
+    },
+    "t_heat_c": {
+     "value": 21.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.lab",
+     "verify": true
+    },
+    "t_cool_c": {
+     "value": 22.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.lab",
+     "verify": true
+    },
+    "occ_start_h": {
+     "value": 8,
+     "source": "Assumption (occupied-period start hour)",
+     "verify": true
+    },
+    "occ_hours": {
+     "value": 10,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.lab.occ_h",
+     "verify": true
+    }
+   },
+   "healthcare": {
+    "label": "Healthcare (patient rooms)",
+    "space_type_basis": "ASHRAE 170-2017 Table 7.1 'Patient room' outdoor air (2 ACH) applied to the whole floor plate; continuously occupied. The 4 ACH total-air requirement is not modelled",
+    "oa_per_person_ls": {
+     "value": 0.0,
+     "source": "Not used: ASHRAE 170 sets outdoor air by air changes (oa_ach)",
+     "verify": false
+    },
+    "oa_per_area_ls_m2": {
+     "value": 0.0,
+     "source": "Not used: ASHRAE 170 sets outdoor air by air changes (oa_ach)",
+     "verify": false
+    },
+    "oa_ach": {
+     "value": 2.0,
+     "source": "ASHRAE 170-2017 Table 7.1, Patient room minimum outdoor air 2 ACH",
+     "verify": true
+    },
+    "m2_per_person": {
+     "value": 20.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.hosp.occ_dens",
+     "verify": true
+    },
+    "lpd_w_m2": {
+     "value": 10.33,
+     "source": "ASHRAE 90.1-2019 Table 9.5.1 Building Area Method, Hospital 0.96 W/ft2",
+     "verify": true
+    },
+    "epd_w_m2": {
+     "value": 18.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.hosp.epd (unsourced there)",
+     "verify": true
+    },
+    "t_heat_c": {
+     "value": 22.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.hosp",
+     "verify": true
+    },
+    "t_cool_c": {
+     "value": 23.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.hosp",
+     "verify": true
+    },
+    "occ_start_h": {
+     "value": 0,
+     "source": "Assumption: continuously occupied",
+     "verify": true
+    },
+    "occ_hours": {
+     "value": 24,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.hosp.occ_h",
+     "verify": true
+    }
+   },
+   "sports": {
+    "label": "Sports (gymnasium / play area)",
+    "space_type_basis": "ASHRAE 62.1-2019 Table 6-1 'Gym, sports arena (play area)' applied to the whole floor plate. Spectator seating is far denser (Table 6-1 'Spectator areas') and is not this type",
+    "oa_per_person_ls": {
+     "value": 10.0,
+     "source": "ASHRAE 62.1-2019 Table 6-1, Gym/sports arena (play area) Rp = 20 cfm/person",
+     "verify": true
+    },
+    "oa_per_area_ls_m2": {
+     "value": 0.9,
+     "source": "ASHRAE 62.1-2019 Table 6-1, Gym/sports arena (play area) Ra = 0.18 cfm/ft2",
+     "verify": true
+    },
+    "oa_ach": {
+     "value": 0.0,
+     "source": "Not used for this type: outdoor air is set by the ASHRAE 62.1 rates (Rp, Ra)",
+     "verify": false
+    },
+    "m2_per_person": {
+     "value": 13.3,
+     "source": "ASHRAE 62.1-2019 Table 6-1 default occupant density 7 /1000 ft2 (play area)",
+     "verify": true
+    },
+    "lpd_w_m2": {
+     "value": 8.18,
+     "source": "ASHRAE 90.1-2019 Table 9.5.1 Building Area Method, Gymnasium 0.76 W/ft2",
+     "verify": true
+    },
+    "epd_w_m2": {
+     "value": 8.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.sports.epd (unsourced there)",
+     "verify": true
+    },
+    "t_heat_c": {
+     "value": 18.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.sports",
+     "verify": true
+    },
+    "t_cool_c": {
+     "value": 25.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.sports",
+     "verify": true
+    },
+    "occ_start_h": {
+     "value": 8,
+     "source": "Assumption (occupied-period start hour)",
+     "verify": true
+    },
+    "occ_hours": {
+     "value": 14,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.sports.occ_h",
+     "verify": true
+    }
+   },
+   "stadium": {
+    "label": "Stadium / arena (enclosed, spectator seating)",
+    "space_type_basis": "ASHRAE 62.1-2019 Table 6-1 'Spectator areas' applied to the whole floor plate - conservative, since concourses and back-of-house are less dense. Enclosed (roofed) venues only; the rectangular-box geometry does not represent a seating bowl, so raise floor-to-floor height toward the real volume",
+    "oa_per_person_ls": {
+     "value": 3.8,
+     "source": "ASHRAE 62.1-2019 Table 6-1, Spectator areas Rp = 7.5 cfm/person",
+     "verify": true
+    },
+    "oa_per_area_ls_m2": {
+     "value": 0.3,
+     "source": "ASHRAE 62.1-2019 Table 6-1, Spectator areas Ra = 0.06 cfm/ft2",
+     "verify": true
+    },
+    "oa_ach": {
+     "value": 0.0,
+     "source": "Not used for this type: outdoor air is set by the ASHRAE 62.1 rates (Rp, Ra)",
+     "verify": false
+    },
+    "m2_per_person": {
+     "value": 0.62,
+     "source": "ASHRAE 62.1-2019 Table 6-1 default occupant density 150 /1000 ft2 (spectator areas)",
+     "verify": true
+    },
+    "lpd_w_m2": {
+     "value": 8.18,
+     "source": "ASHRAE 90.1-2019 Table 9.5.1 Building Area Method, Sports arena 0.76 W/ft2",
+     "verify": true
+    },
+    "epd_w_m2": {
+     "value": 8.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.sports.epd (unsourced there)",
+     "verify": true
+    },
+    "t_heat_c": {
+     "value": 18.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.sports",
+     "verify": true
+    },
+    "t_cool_c": {
+     "value": 25.0,
+     "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.sports",
+     "verify": true
+    },
+    "occ_start_h": {
+     "value": 14,
+     "source": "Assumption: afternoon event, coinciding with peak outdoor temperature and solar (conservative); set to your event schedule",
+     "verify": true
+    },
+    "occ_hours": {
+     "value": 4,
+     "source": "Assumption: one event (about 4 h including ingress/egress); set to your event schedule",
+     "verify": true
     }
    }
   }
  },
  "design_space": {
-  "_readme": "Design-space bounds for training the surrogate (option B). These are sampling ranges, not defaults or recommendations; widen or narrow them per study. Inputs not listed under 'sampled' are held at the archetype default during training - if a user changes one of those, the UI marks the surrogate as not applicable and asks for an EnergyPlus run.",
+  "_readme": "Design-space bounds for training the surrogate (option B). These are sampling ranges, not defaults or recommendations; widen or narrow them per study. 'scale_of_default' and 'offset_of_default' are relative to each building type's default, so every type's defaults sit inside its own trained range. Inputs not listed under 'sampled' are held at the type default during training - if a user changes one of those, the UI marks the surrogate as not applicable and asks for an EnergyPlus run.",
   "sampled": {
-   "wwr": {
-    "min": 0.1,
-    "max": 0.8
-   },
-   "wall_u": {
-    "min": 0.15,
-    "max": 1.0
-   },
-   "roof_u": {
-    "min": 0.1,
-    "max": 0.5
-   },
-   "win_u": {
+   "aspect_ratio": {
     "min": 1.0,
-    "max": 3.5
+    "max": 3.0
    },
-   "shgc": {
-    "min": 0.2,
+   "epd_w_m2": {
+    "scale_of_default": [
+     0.25,
+     2.0
+    ]
+   },
+   "erv_latent_eff": {
+    "min": 0.0,
+    "max": 0.75
+   },
+   "erv_sensible_eff": {
+    "min": 0.0,
+    "max": 0.85
+   },
+   "floor_plate_m2": {
+    "min": 500,
+    "max": 5000,
+    "_note": "gfa_m2 = floor_plate_m2 * n_floors"
+   },
+   "infiltration_ach": {
+    "min": 0.05,
     "max": 0.6
    },
-   "overhang_pf": {
-    "min": 0.0,
-    "max": 1.0
+   "lpd_w_m2": {
+    "scale_of_default": [
+     0.4,
+     1.6
+    ]
    },
    "m2_per_person": {
     "scale_of_default": [
@@ -2410,57 +2709,64 @@ var LOADS_DATA = {
      2.0
     ]
    },
-   "lpd_w_m2": {
-    "min": 3.0,
-    "max": 12.0
+   "n_floors": {
+    "min": 1,
+    "max": 15,
+    "int": true
    },
-   "epd_w_m2": {
-    "min": 3.0,
-    "max": 25.0
+   "north_axis_deg": {
+    "min": 0.0,
+    "max": 180.0
+   },
+   "oa_ach": {
+    "scale_of_default": [
+     0.5,
+     2.0
+    ],
+    "_note": "zero for types whose outdoor air is set by 62.1 rates"
    },
    "oa_multiplier": {
     "min": 0.75,
     "max": 2.0,
     "_note": "scales both archetype oa_per_person_ls and oa_per_area_ls_m2"
    },
-   "erv_sensible_eff": {
+   "overhang_pf": {
     "min": 0.0,
-    "max": 0.85
+    "max": 1.0
    },
-   "erv_latent_eff": {
-    "min": 0.0,
-    "max": 0.75
+   "roof_u": {
+    "min": 0.1,
+    "max": 0.5
    },
-   "infiltration_ach": {
-    "min": 0.05,
+   "shgc": {
+    "min": 0.2,
     "max": 0.6
    },
    "t_cool_c": {
-    "min": 22.5,
-    "max": 27.0
+    "offset_of_default": [
+     -2.0,
+     3.0
+    ],
+    "_note": "degrees C added to the type's cooling setpoint"
    },
    "t_heat_c": {
-    "min": 18.0,
-    "max": 22.0,
-    "_note": "kept below the t_cool_c minimum so every sample has a deadband"
+    "offset_of_default": [
+     -3.0,
+     1.0
+    ],
+    "_note": "degrees C added to the type's heating setpoint; capped at 1 C below the sampled cooling setpoint"
    },
-   "n_floors": {
-    "min": 1,
-    "max": 15,
-    "int": true
+   "wall_u": {
+    "min": 0.15,
+    "max": 1.0
    },
-   "aspect_ratio": {
+   "win_u": {
     "min": 1.0,
-    "max": 3.0
+    "max": 3.5
    },
-   "floor_plate_m2": {
-    "min": 500,
-    "max": 5000,
-    "_note": "gfa_m2 = floor_plate_m2 * n_floors"
-   },
-   "north_axis_deg": {
-    "min": 0.0,
-    "max": 180.0
+   "wwr": {
+    "min": 0.1,
+    "max": 0.8
    }
   },
   "fixed_inputs": [
@@ -2555,7 +2861,7 @@ var LOADS_DATA = {
   },
   "m2_per_person": {
    "unit": "m2/person",
-   "min": 1,
+   "min": 0.3,
    "max": 200
   },
   "activity_w_per_person": {
@@ -2621,6 +2927,11 @@ var LOADS_DATA = {
    "unit": "L/s-m2",
    "min": 0,
    "max": 10
+  },
+  "oa_ach": {
+   "unit": "1/h",
+   "min": 0,
+   "max": 30
   },
   "erv_sensible_eff": {
    "unit": "-",

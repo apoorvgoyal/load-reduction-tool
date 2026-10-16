@@ -226,7 +226,7 @@ class IddValidationTests(unittest.TestCase):
     def test_batch_samples_validate(self):
         import batch
         import run_scenario
-        for btype in ('office', 'school', 'retail', 'hotel'):
+        for btype in scenario.load_archetypes()['types']:
             for station in ('fairbanks', 'miami', 'denver'):
                 for _, user in batch.make_samples(btype, station, 6, 1):
                     _, ddy, stat, sc, _ = run_scenario.build_model(user)

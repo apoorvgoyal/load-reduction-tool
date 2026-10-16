@@ -1,28 +1,121 @@
 {
-  "_readme": "Design-space bounds for training the surrogate (option B). These are sampling ranges, not defaults or recommendations; widen or narrow them per study. Inputs not listed under 'sampled' are held at the archetype default during training - if a user changes one of those, the UI marks the surrogate as not applicable and asks for an EnergyPlus run.",
+  "_readme": "Design-space bounds for training the surrogate (option B). These are sampling ranges, not defaults or recommendations; widen or narrow them per study. 'scale_of_default' and 'offset_of_default' are relative to each building type's default, so every type's defaults sit inside its own trained range. Inputs not listed under 'sampled' are held at the type default during training - if a user changes one of those, the UI marks the surrogate as not applicable and asks for an EnergyPlus run.",
   "sampled": {
-    "wwr":               {"min": 0.10, "max": 0.80},
-    "wall_u":            {"min": 0.15, "max": 1.00},
-    "roof_u":            {"min": 0.10, "max": 0.50},
-    "win_u":             {"min": 1.00, "max": 3.50},
-    "shgc":              {"min": 0.20, "max": 0.60},
-    "overhang_pf":       {"min": 0.00, "max": 1.00},
-    "m2_per_person":     {"scale_of_default": [0.5, 2.0]},
-    "lpd_w_m2":          {"min": 3.0,  "max": 12.0},
-    "epd_w_m2":          {"min": 3.0,  "max": 25.0},
-    "oa_multiplier":     {"min": 0.75, "max": 2.0, "_note": "scales both archetype oa_per_person_ls and oa_per_area_ls_m2"},
-    "erv_sensible_eff":  {"min": 0.0,  "max": 0.85},
-    "erv_latent_eff":    {"min": 0.0,  "max": 0.75},
-    "infiltration_ach":  {"min": 0.05, "max": 0.60},
-    "t_cool_c":          {"min": 22.5, "max": 27.0},
-    "t_heat_c":          {"min": 18.0, "max": 22.0, "_note": "kept below the t_cool_c minimum so every sample has a deadband"},
-    "n_floors":          {"min": 1,    "max": 15, "int": true},
-    "aspect_ratio":      {"min": 1.0,  "max": 3.0},
-    "floor_plate_m2":    {"min": 500,  "max": 5000, "_note": "gfa_m2 = floor_plate_m2 * n_floors"},
-    "north_axis_deg":    {"min": 0.0,  "max": 180.0}
+    "aspect_ratio": {
+      "min": 1.0,
+      "max": 3.0
+    },
+    "epd_w_m2": {
+      "scale_of_default": [
+        0.25,
+        2.0
+      ]
+    },
+    "erv_latent_eff": {
+      "min": 0.0,
+      "max": 0.75
+    },
+    "erv_sensible_eff": {
+      "min": 0.0,
+      "max": 0.85
+    },
+    "floor_plate_m2": {
+      "min": 500,
+      "max": 5000,
+      "_note": "gfa_m2 = floor_plate_m2 * n_floors"
+    },
+    "infiltration_ach": {
+      "min": 0.05,
+      "max": 0.6
+    },
+    "lpd_w_m2": {
+      "scale_of_default": [
+        0.4,
+        1.6
+      ]
+    },
+    "m2_per_person": {
+      "scale_of_default": [
+        0.5,
+        2.0
+      ]
+    },
+    "n_floors": {
+      "min": 1,
+      "max": 15,
+      "int": true
+    },
+    "north_axis_deg": {
+      "min": 0.0,
+      "max": 180.0
+    },
+    "oa_ach": {
+      "scale_of_default": [
+        0.5,
+        2.0
+      ],
+      "_note": "zero for types whose outdoor air is set by 62.1 rates"
+    },
+    "oa_multiplier": {
+      "min": 0.75,
+      "max": 2.0,
+      "_note": "scales both archetype oa_per_person_ls and oa_per_area_ls_m2"
+    },
+    "overhang_pf": {
+      "min": 0.0,
+      "max": 1.0
+    },
+    "roof_u": {
+      "min": 0.1,
+      "max": 0.5
+    },
+    "shgc": {
+      "min": 0.2,
+      "max": 0.6
+    },
+    "t_cool_c": {
+      "offset_of_default": [
+        -2.0,
+        3.0
+      ],
+      "_note": "degrees C added to the type's cooling setpoint"
+    },
+    "t_heat_c": {
+      "offset_of_default": [
+        -3.0,
+        1.0
+      ],
+      "_note": "degrees C added to the type's heating setpoint; capped at 1 C below the sampled cooling setpoint"
+    },
+    "wall_u": {
+      "min": 0.15,
+      "max": 1.0
+    },
+    "win_u": {
+      "min": 1.0,
+      "max": 3.5
+    },
+    "wwr": {
+      "min": 0.1,
+      "max": 0.8
+    }
   },
-  "fixed_inputs": ["floor_to_floor_m", "perimeter_depth_m", "activity_w_per_person", "unoccupied_internal_fraction",
-                   "occ_start_h", "occ_hours", "cooling_supply_air_c", "heating_supply_air_c", "slab_f_factor_w_mk",
-                   "thermal_mass", "setback_heat_c", "setup_cool_c"],
-  "post_processed": ["cooling_sizing_factor", "heating_sizing_factor"]
+  "fixed_inputs": [
+    "floor_to_floor_m",
+    "perimeter_depth_m",
+    "activity_w_per_person",
+    "unoccupied_internal_fraction",
+    "occ_start_h",
+    "occ_hours",
+    "cooling_supply_air_c",
+    "heating_supply_air_c",
+    "slab_f_factor_w_mk",
+    "thermal_mass",
+    "setback_heat_c",
+    "setup_cool_c"
+  ],
+  "post_processed": [
+    "cooling_sizing_factor",
+    "heating_sizing_factor"
+  ]
 }

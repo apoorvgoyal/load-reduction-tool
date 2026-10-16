@@ -39,7 +39,7 @@ python3 -m unittest discover -s engine/tests -t engine
 ## Regenerated files (don't hand-edit)
 
 - `web/data/loads-data.js`: rerun `python3 engine/build_data.py` after editing `engine/stations.json`, `engine/archetypes.json`, `engine/variables.json` or `engine/lib/scenario.py` (FIELDS).
-- `web/data/loads-surrogate.js`: produced by `python3 engine/fit_surrogate.py` from `engine/runs/*.jsonl`, which come from `engine/batch.py`. `engine/runs/` is git-ignored.
+- `web/data/loads-surrogate.js` (index) and `web/data/surrogates/*.js` (one per model): produced by `python3 engine/fit_surrogate.py` from `engine/runs/*.jsonl` (including `.shard-K-of-N` files), which come from `engine/batch.py`. `engine/validate.py` adds each model's `holdout` result. `engine/runs/` (training and `runs/test/`) is git-ignored.
 - `engine/weather/*.ddy|*.stat`: fetched by `python3 engine/fetch_weather.py` from the DOE EnergyPlus weather library and committed.
 
 ## Rules for this codebase
@@ -56,4 +56,6 @@ python3 -m unittest discover -s engine/tests -t engine
   - Sizing factors stay explicit and default to 1.0.
 - **Middle-floor scaling** is done in `engine/lib/results.py` with the model's per-zone `scale`, not with EnergyPlus zone multipliers. Keep it that way so the scaling stays auditable.
 - **Status:** heating peaks are validated against hand calcs on real EnergyPlus 25.2 runs; cooling peaks are not yet checked against an independent reference (README Status section). Treat results as validation-stage, not production.
+- **Training vs test data:** `batch.py` trains with seed 1; `validate.py` tests with seed 9001 and stores runs in `engine/runs/test/`. Never fit on test runs or validate with the training seed.
+- **Backward-compatible inputs:** older run records may lack newer scenario fields (for example `oa_ach`); feature code must treat a missing field as its neutral value rather than failing.
 - **Outdoor-air outputs** (`Zone Ideal Loads Outdoor Air ...`) are the load before heat recovery; recovery is reported separately (`heat_recovery_w`) and is already netted out of the supply-air totals. Don't add or subtract it from the totals again.

@@ -32,7 +32,10 @@ def features(sc):
     a, length, width, perim = geometry(sc)
     ew = perim * h * n / gfa
     ppl = 1.0 / sc['m2_per_person']
-    oa = sc['oa_per_person_ls'] * ppl + sc['oa_per_area_ls_m2']
+    # Outdoor air in L/s per m2 floor: 62.1-style rates plus any air-change rate
+    # (ACH x floor-to-floor height / 3.6 converts 1/h to L/s per m2). Runs made
+    # before oa_ach existed had none, i.e. 0.
+    oa = sc['oa_per_person_ls'] * ppl + sc['oa_per_area_ls_m2'] + sc.get('oa_ach', 0.0) * h / 3.6
     d = sc['perimeter_depth_m']
     core = max(0.0, width - 2 * d) * max(0.0, length - 2 * d) / a
     th = math.radians(sc['north_axis_deg'])

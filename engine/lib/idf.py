@@ -322,7 +322,7 @@ def build(sc, ddy, stat, eplus_version='25.2'):
         ('Outdoor Air Flow per Person', sc['oa_per_person_ls'] / 1000.0),
         ('Outdoor Air Flow per Zone Floor Area', sc['oa_per_area_ls_m2'] / 1000.0),
         ('Outdoor Air Flow per Zone', 0.0),
-        ('Outdoor Air Flow Air Changes per Hour', 0.0),
+        ('Outdoor Air Flow Air Changes per Hour', float(sc['oa_ach'])),   # added to Rp/Ra (method Sum)
         ('Outdoor Air Schedule Name', 'OA_SCH')])
 
     hr_type = 'None'

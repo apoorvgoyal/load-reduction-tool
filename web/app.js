@@ -6,7 +6,21 @@
 (function () {
   'use strict';
   var D = window.LOADS_DATA, C = window.LoadsCore;
-  var SUR = (window.LOADS_SURROGATE && window.LOADS_SURROGATE.models) || {};
+  // Trained models: a small index is loaded with the page; each model's file
+  // (data/surrogates/<type>__<station>.js) is loaded the first time it's needed.
+  var SUR_INDEX = (window.LOADS_SURROGATE && (window.LOADS_SURROGATE.index || window.LOADS_SURROGATE.models)) || {};
+  var SUR = window.LOADS_SURROGATE_MODELS = window.LOADS_SURROGATE_MODELS ||
+    ((window.LOADS_SURROGATE && window.LOADS_SURROGATE.models) || {});
+  var SUR_LOADING = {};
+  function loadModel(key) {
+    if (SUR[key] || !SUR_INDEX[key] || SUR_LOADING[key]) return;
+    SUR_LOADING[key] = true;
+    var s = document.createElement('script');
+    s.src = 'data/surrogates/' + key.replace('|', '__') + '.js';
+    s.onload = function () { render(); };
+    s.onerror = function () { SUR_LOADING[key] = 'error'; render(); };
+    document.head.appendChild(s);
+  }
   var STORE_KEY = 'peak-load-tool.v1';
 
   // ── Units ───────────────────────────────────────────────────────────────
@@ -51,6 +65,7 @@
     {title: 'Ventilation & infiltration', open: true, fields: [
       ['oa_per_person_ls', 'Outdoor air per person (Rp)', 'L/s-person', 0.1],
       ['oa_per_area_ls_m2', 'Outdoor air per area (Ra)', 'L/s-m2', 0.01],
+      ['oa_ach', 'Outdoor air by air changes (labs, ASHRAE 170)', '1/h', 0.5],
       ['erv_sensible_eff', 'Heat recovery sensible effectiveness', '-', 0.05],
       ['erv_latent_eff', 'Heat recovery latent effectiveness', '-', 0.05],
       ['infiltration_ach', 'Infiltration (whole building)', '1/h', 0.01]]},
@@ -83,7 +98,8 @@
   var SWEEP_LABELS = {
     wwr: 'Window-to-wall ratio', wall_u: 'Wall U', roof_u: 'Roof U', win_u: 'Window U', shgc: 'SHGC',
     overhang_pf: 'Overhang PF', m2_per_person: 'Area per person', lpd_w_m2: 'Lighting W/m²',
-    epd_w_m2: 'Equipment W/m²', oa_multiplier: 'Outdoor air (× 62.1 rate)', erv_sensible_eff: 'ERV sensible eff.',
+    epd_w_m2: 'Equipment W/m²', oa_multiplier: 'Outdoor air (× 62.1 rate)', oa_ach: 'Outdoor air ACH',
+    erv_sensible_eff: 'ERV sensible eff.',
     erv_latent_eff: 'ERV latent eff.', infiltration_ach: 'Infiltration ACH', t_cool_c: 'Cooling setpoint',
     t_heat_c: 'Heating setpoint', n_floors: 'Floors (same GFA)', aspect_ratio: 'Aspect ratio',
     north_axis_deg: 'Orientation (0° vs 90°)'
@@ -166,7 +182,11 @@
   // Result for a scenario: a matching EnergyPlus run wins, else the surrogate.
   function resultFor(sc, epRun) {
     if (epRun && epRun.hash === scenarioHash(sc)) return C.energyplusResult(epRun.run);
-    var m = SUR[sc.type + '|' + sc.station];
+    var key = sc.type + '|' + sc.station, m = SUR[key];
+    if (!m && SUR_INDEX[key]) {
+      loadModel(key);
+      return {source: 'none', reason: SUR_LOADING[key] === 'error' ? 'load-error' : 'loading'};
+    }
     if (!m) return {source: 'none', reason: 'no-model'};
     var r = C.surrogateResult(m, sc);
     if (r.incompatible) return {source: 'none', reason: 'incompatible'};
@@ -272,7 +292,7 @@
 
   // ── Rendering: results ──────────────────────────────────────────────────
   function renderStatus() {
-    var e = S.engine, m = SUR[S.type + '|' + S.station], h = '';
+    var e = S.engine, m = SUR_INDEX[S.type + '|' + S.station], h = '';
     if (e === null) h += '<span class="pill"><span class="dot"></span>EnergyPlus: checking…</span>';
     else if (e.available) h += '<span class="pill ok"><span class="dot"></span>EnergyPlus ' + esc(e.version) + ' online</span>';
     else h += '<span class="pill off" title="' + esc(e.reason || '') + '"><span class="dot"></span>EnergyPlus offline</span>';
@@ -417,7 +437,13 @@
         hi = Math.min(sp.max, Math.floor(sc0.gfa_m2 / space.floor_plate_m2.min));
         if (hi <= lo) return;
       } else if (sp.scale_of_default) { lo = def[key] * sp.scale_of_default[0]; hi = def[key] * sp.scale_of_default[1]; }
+      else if (sp.offset_of_default) { lo = def[key] + sp.offset_of_default[0]; hi = def[key] + sp.offset_of_default[1]; }
       else { lo = sp.min; hi = sp.max; }
+      // Keep a deadband: heating at least 1 C below cooling, as in training.
+      if (key === 't_heat_c') hi = Math.min(hi, sc0.t_cool_c - 1);
+      if (key === 't_cool_c') lo = Math.max(lo, sc0.t_heat_c + 1);
+      if (key === 'oa_multiplier' && !(def.oa_per_person_ls > 0) && !(def.oa_per_area_ls_m2 > 0)) return;
+      if (!(hi > lo)) return;
       var dl = at(key, lo), dh = at(key, hi);
       rows.push({key: key, lo: lo, hi: hi, dl: dl, dh: dh, span: Math.abs(dh - dl)});
     });
@@ -520,6 +546,14 @@
         var e = Math.max(g.errC || 0, g.errH || 0);
         h += '<div class="note info">Surrogate trained on ' + res.model.n + ' EnergyPlus runs. Out-of-sample error (95th percentile): ' +
           fmt(g.errC, 1) + '% cooling, ' + fmt(g.errH, 1) + '% heating. Run EnergyPlus for numbers to put in a basis of design.</div>';
+        var ho = res.model.holdout;
+        if (ho) {
+          h += '<div class="note ' + (ho.passed ? 'info' : 'bad') + '">Independent test against ' + ho.n +
+            ' fresh EnergyPlus runs: worst 95th-percentile error ' + fmt(ho.worst_total_p95_pct, 1) + '% (limit ' +
+            fmt(ho.threshold_pct, 1) + '%) - ' + (ho.passed ? 'passed' : 'FAILED; treat these estimates with caution') + '.</div>';
+        } else {
+          h += '<div class="note warn">Not yet tested against independent EnergyPlus runs (run engine/validate.py).</div>';
+        }
         if (res.extrapolated.length) {
           h += '<div class="note warn">Outside the trained range: ' + res.extrapolated.map(function (x) {
             return esc(FEATURE_LABELS[x.feature]) + ' ' + fmt(x.value, 2) + ' (trained ' + fmt(x.min, 2) + '–' + fmt(x.max, 2) + ')';
@@ -531,7 +565,11 @@
       h += kpisCard(g, b) + compareTable(g, b);
     } else {
       h += '<div class="empty">';
-      if (res.reason === 'incompatible') {
+      if (res.reason === 'loading') {
+        h += 'Loading the trained model…';
+      } else if (res.reason === 'load-error') {
+        h += 'The trained model file for this building type and station could not be loaded (data/surrogates/). Re-run <code>py engine/fit_surrogate.py</code>.';
+      } else if (res.reason === 'incompatible') {
         h += 'The trained surrogate for this building type and station was fitted by an older version of the tool.<br>' +
           'Re-run <code>py engine/fit_surrogate.py</code> (no new EnergyPlus runs needed), then reload this page.';
       } else if (res.reason === 'fixed') {

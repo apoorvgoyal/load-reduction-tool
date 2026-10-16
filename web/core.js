@@ -53,7 +53,7 @@
     var a = gfa / n, length = Math.sqrt(a * sc.aspect_ratio), width = a / length;
     var perim = 2 * (length + width), ew = perim * h * n / gfa;
     var ppl = 1 / sc.m2_per_person;
-    var oa = sc.oa_per_person_ls * ppl + sc.oa_per_area_ls_m2;
+    var oa = sc.oa_per_person_ls * ppl + sc.oa_per_area_ls_m2 + (sc.oa_ach || 0) * h / 3.6;
     var d = sc.perimeter_depth_m;
     var core = Math.max(0, width - 2 * d) * Math.max(0, length - 2 * d) / a;
     var th = sc.north_axis_deg * Math.PI / 180;
@@ -130,7 +130,7 @@
     });
     return {source: 'surrogate', gfa: gfa, dd: dd, extrapolated: p.extrapolated, fixedDiffs: p.fixedDiffs,
       incompatible: !!p.incompatible,
-      model: {n: model.n_samples, eplus: model.eplus_versions, fitted: model.fitted_at}};
+      model: {n: model.n_samples, eplus: model.eplus_versions, fitted: model.fitted_at, holdout: model.holdout || null}};
   }
 
   // Convert an EnergyPlus run (engine/run_scenario.py JSON) into the same shape.

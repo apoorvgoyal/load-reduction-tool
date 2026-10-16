@@ -3,6 +3,13 @@ space in variables.json, each run through EnergyPlus.
 
 Usage:
   python3 engine/batch.py --types office --stations chicago,houston --n 500 --workers 4
+  python3 engine/batch.py --types all --stations all --n 5000             # everything
+  python3 engine/batch.py --types all --stations all --n 5000 --shard 2/4 # this PC's quarter
+
+Sharding: with --shard K/N a machine runs only every N-th sample (ids where
+id % N == K - 1) and writes <type>__<station>.shard-K-of-N.jsonl. Run each
+K on a different PC with identical --types/--stations/--n/--seed, then copy all
+the result files into one engine/runs/ folder; fit_surrogate.py merges them.
 
 Output: engine/runs/<type>__<station>.jsonl, one line per completed sample:
   {"id": 17, "scenario": {...}, "features": [...], "targets": {...}, "eplus": "..."}
@@ -22,7 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import run_scenario  # noqa: E402
-from lib import features, scenario  # noqa: E402
+from lib import features, runs, scenario  # noqa: E402
 
 RUNS = os.path.join(HERE, 'runs')
 
@@ -52,6 +59,9 @@ def make_samples(btype, station, n, seed):
                 lo, hi = spec['scale_of_default']
                 base = arch[name]['value']
                 val = base * (lo + (hi - lo) * x)
+            elif 'offset_of_default' in spec:
+                lo, hi = spec['offset_of_default']
+                val = arch[name]['value'] + lo + (hi - lo) * x
             else:
                 val = spec['min'] + (spec['max'] - spec['min']) * x
                 if spec.get('int'):
@@ -62,6 +72,7 @@ def make_samples(btype, station, n, seed):
             if k in ('oa_multiplier', 'floor_plate_m2'):
                 continue
             user[k] = val
+        user['t_heat_c'] = min(user['t_heat_c'], user['t_cool_c'] - 1.0)   # keep a deadband
         user['oa_per_person_ls'] = arch['oa_per_person_ls']['value'] * v['oa_multiplier']
         user['oa_per_area_ls_m2'] = arch['oa_per_area_ls_m2']['value'] * v['oa_multiplier']
         user['gfa_m2'] = v['floor_plate_m2'] * v['n_floors']
@@ -93,12 +104,14 @@ def _hms(sec):
 
 def main(argv):
     ap = argparse.ArgumentParser()
-    ap.add_argument('--types', required=True)
+    ap.add_argument('--types', required=True, help="comma list of building types, or 'all'")
     ap.add_argument('--stations', required=True, help="comma list of station ids, or 'all'")
+    ap.add_argument('--shard', default=None, help="K/N: run only this machine's share, e.g. 2/4")
     ap.add_argument('--n', type=int, default=500)
     ap.add_argument('--workers', type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument('--seed', type=int, default=1)
     a = ap.parse_args(argv)
+    shard = runs.parse_shard(a.shard) if a.shard else None
 
     exe, version = run_scenario.find_energyplus()
     if not exe:
@@ -108,20 +121,27 @@ def main(argv):
             stations = [s['id'] for s in json.load(f)['stations']]
     else:
         stations = a.stations.split(',')
+    types = list(scenario.load_archetypes()['types']) if a.types == 'all' else a.types.split(',')
+    unknown = [t for t in types if t not in scenario.load_archetypes()['types']]
+    if unknown:
+        sys.exit('Unknown building type(s): %s' % ', '.join(unknown))
     os.makedirs(RUNS, exist_ok=True)
 
-    for btype in a.types.split(','):
+    for btype in types:
         for station in stations:
-            path = os.path.join(RUNS, '%s__%s.jsonl' % (btype, station))
-            done = set()
-            if os.path.exists(path):
-                with open(path) as f:
-                    done = {json.loads(l)['id'] for l in f if l.strip()}
-            todo = [(i, u, exe, version) for i, u in make_samples(btype, station, a.n, a.seed) if i not in done]
-            print('%s/%s: %d done, %d to run' % (btype, station, len(done), len(todo)), flush=True)
+            path = runs.result_file(RUNS, btype, station, shard)
+            # Skip ids already done in ANY file for this pair (other shards copied in).
+            done = {r['id'] for r in runs.load(runs.files_for(RUNS, btype, station))}
+            samples = make_samples(btype, station, a.n, a.seed)
+            if shard:
+                samples = [(i, u) for i, u in samples if i % shard[1] == shard[0] - 1]
+            todo = [(i, u, exe, version) for i, u in samples if i not in done]
+            print('%s/%s%s: %d of %d done, %d to run' % (
+                btype, station, ' (shard %d/%d)' % shard if shard else '',
+                len(samples) - len(todo), len(samples), len(todo)), flush=True)
             if not todo:
                 continue
-            failed_path = path.replace('.jsonl', '.failed.jsonl')
+            failed_path = path[:-len('.jsonl')] + '.failed.jsonl'
             n_ok = n_bad = 0
             t0 = time.time()
             with ProcessPoolExecutor(max_workers=a.workers) as pool, open(path, 'a') as ok_f:

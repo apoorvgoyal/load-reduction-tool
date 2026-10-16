@@ -59,14 +59,59 @@ Server environment variables: `PORT` (3100), `ENERGYPLUS_EXE`, `LOADS_MAX_CONCUR
 
 ```bash
 pip install numpy
-python3 engine/batch.py --types office --stations chicago --n 500 --workers 8   # resumable
-python3 engine/fit_surrogate.py                                                    # writes web/data/loads-surrogate.js
+python3 engine/batch.py --types office --stations chicago --n 5000      # resumable; Ctrl+C and re-run to continue
+python3 engine/fit_surrogate.py                                         # publishes web/data/loads-surrogate.js + surrogates/
+python3 engine/validate.py --types office --stations chicago            # independent test (see below)
 ```
 
-- `engine/variables.json` defines the sampled design space. Each sample is one EnergyPlus run, and every run simulates all eight design days.
-- The fit is a quadratic ridge regression on 19 features. Ridge strength is chosen by 5-fold cross-validation, and the error statistics stored with each model are out-of-fold.
-- Plan roughly 400–600 runs per building type × station. Check the reported P95 error before relying on a model; if it is poor, add samples or narrow the design space.
-- Failed runs go to `engine/runs/*.failed.jsonl`. Samples with severe EnergyPlus errors are counted in the model metadata.
+- `--types all --stations all` covers every building type and station.
+- `engine/variables.json` defines the sampled design space. Ranges given as `scale_of_default` or `offset_of_default` are relative to each building type's defaults, so every type's defaults sit inside its trained range.
+- Each sample is one EnergyPlus run, and every run simulates all eight design days.
+- The fit is a quadratic ridge regression on 21 physics-shaped features (`engine/lib/features.py`). Ridge strength is chosen by 5-fold cross-validation; the error statistics stored with each model are out-of-fold.
+- **More data helps:** on 500 real office/Chicago runs, held-out P95 cooling error fell from 32% (100 runs) to 3% (400 runs) and was still falling.
+- Failed runs go to `engine/runs/*.failed.jsonl`. Samples with severe EnergyPlus errors are counted in the model metadata, with their first messages kept.
+- Published models are a small index (`web/data/loads-surrogate.js`) plus one file per model (`web/data/surrogates/<type>__<station>.js`, about 160 kB). The page loads only the model it needs.
+
+### Running at scale: all types × all stations
+
+9 building types × 27 stations = **243 models**. At 5,000 runs each that is **about 1.2 million EnergyPlus runs**.
+
+**Time:** one 8-core Windows PC ran 500 runs in about 12.5 minutes (≈1.5 s per run with parallel workers). At that rate the full set takes **about 500 hours (≈21 days) on one PC**. Split it across machines:
+
+```bash
+# Same command on each PC, changing only K (1..N):
+python3 engine/batch.py --types all --stations all --n 5000 --shard 1/4    # PC 1
+python3 engine/batch.py --types all --stations all --n 5000 --shard 2/4    # PC 2  ... and so on
+```
+
+- With N machines the wall time divides by about N. For example, 10 PCs (or cloud VMs) take about 2 days.
+- Each shard writes `<type>__<station>.shard-K-of-N.jsonl`.
+- Copy every machine's `engine/runs/*.jsonl` into one `engine/runs/` folder; `fit_surrogate.py` merges and de-duplicates them.
+- A machine can stop and resume at any time.
+
+**Disk:** about 3.7 kB per run, so roughly 4.5 GB of result files in total.
+
+**Suggested order:** finish one model to 5,000 runs and validate it before committing the full compute. Then prioritise the building types and cities you use most.
+
+### Automatic testing against EnergyPlus
+
+```bash
+python3 engine/validate.py                    # every trained model; 50 test cases each + the type default
+python3 engine/validate.py --skip-run         # re-score existing test runs (e.g. after a refit), no EnergyPlus needed
+python3 engine/validate.py --threshold 5      # pass limit: worst P95 % across all design-day block totals
+```
+
+What `validate.py` does for each trained model:
+1. Draws an independent test set: a Latin-hypercube sample with seed 9001, separate from the training seed, plus the building type's default scenario.
+2. Runs any missing cases in EnergyPlus. These go in `engine/runs/test/`, which is never used for training.
+3. Predicts every case exactly as the page does, and compares it with EnergyPlus.
+
+It then:
+- writes `engine/validation/report.md` and `report.json`;
+- records the result on the model, which the page shows as "Independent test against N fresh EnergyPlus runs";
+- exits with code 1 if any model misses the threshold, so it can gate a release or a CI job.
+
+Refitting a model clears its recorded test result; re-run `validate.py --skip-run` to re-score it. At 50 cases per model the full set adds about 12,400 runs (about 5 hours on one PC).
 
 ## Diagnostics
 
@@ -114,7 +159,12 @@ Then open `diag1\eplusout.err` and look for the `** Severe  **` lines.
 
 | Building type | Basis |
 |---|---|
-| Office, K-12 school, retail, hotel | Outdoor air and occupant density: ASHRAE 62.1-2019 Table 6-1. Lighting: ASHRAE 90.1-2019 building area method (to verify). Equipment, setpoints, hours: carried over (to verify). |
+| Office, K-12 school, retail, hospitality (hotel guestrooms) | Outdoor air and occupant density: ASHRAE 62.1-2019 Table 6-1. Lighting: ASHRAE 90.1-2019 building area method (to verify). Equipment, setpoints, hours: carried over (to verify). |
+| Higher education | 62.1 lecture-classroom outdoor air rates; blended building density, equipment, setpoints and hours carried over (to verify). |
+| Laboratory | Outdoor air by air changes (`oa_ach`, default 6 ACH: a common design minimum, not a code value; set per program). Fume-hood exhaust beyond that is not modelled. Lighting, equipment, density and setpoints carried over (to verify). |
+| Healthcare (patient rooms) | ASHRAE 170-2017 Table 7.1 patient-room outdoor air (2 ACH). The total-air requirement is not modelled. Lighting: 90.1 hospital (to verify). |
+| Sports (gym / play area) | 62.1 "Gym, sports arena (play area)" outdoor air and density (to verify). |
+| Stadium / arena | 62.1 "Spectator areas" outdoor air and density across the whole floor plate (conservative). Enclosed venues only; the box geometry is not a seating bowl. Event timing is an assumption (afternoon, 4 h). |
 
 Envelope defaults by climate zone were carried over from the Total Carbon Tool and still need checking against 90.1-2019 Tables 5.5. There are no built-in cost data; enter your own $/ton and $/MBH rates.
 
@@ -133,11 +183,14 @@ load-reduction-tool/
   server.js                 same server in Node (optional alternative)
   web/                      index.html, app.js (UI), core.js (pure logic, also used by tests), styles.css
   web/data/loads-data.js    stations + design conditions, defaults, design space (built by engine/build_data.py)
-  web/data/loads-surrogate.js  trained models (built by engine/fit_surrogate.py; absent until trained)
+  web/data/loads-surrogate.js  index of trained models (built by engine/fit_surrogate.py; absent until trained)
+  web/data/surrogates/      one file per trained model, loaded on demand
   engine/
     run_scenario.py         one scenario → EnergyPlus → JSON
     batch.py                Latin-hypercube training runs
     fit_surrogate.py        fit + publish surrogate
+    validate.py             test published surrogates against fresh EnergyPlus runs
+    validation/             validate.py reports (report.md, report.json)
     build_data.py           publish station/defaults data for the page
     fetch_weather.py        download .ddy/.stat files listed in stations.json
     archetypes.json         defaults with sources
