@@ -457,20 +457,57 @@
     });
     rows = rows.sort(function (a, b) { return b.span - a.span; }).slice(0, 10);
     var mx = Math.max.apply(null, rows.map(function (r) { return Math.max(Math.abs(r.dl), Math.abs(r.dh)); })) || 1;
-    var h = '<div class="card"><h2>What moves the cooling peak</h2><p class="sub">Change in block cooling (tons) when one design input moves to the low or high end of the trained range, all others held at current values. From the surrogate; confirm decisions with an EnergyPlus run.</p><div class="tornado">';
+    var h = '<div class="card"><h2>Which inputs move the cooling peak most</h2>' +
+      '<p class="sub">Each row tries one input at the low and high end of its realistic range, with everything else ' +
+      'kept as you have set it. The longest bars are your biggest levers. <span style="color:var(--good)">Green</span> = ' +
+      'peak cooling goes down, <span style="color:var(--bad)">red</span> = it goes up. These are fast estimates; confirm ' +
+      'a chosen option with Run EnergyPlus.</p><div class="tz">';
     rows.forEach(function (r) {
       function bar(d) {
         var w = Math.abs(d) / mx * 50, left = d < 0 ? 50 - w : 50;
         return '<div class="bar ' + (d < 0 ? 'neg' : 'pos') + '" style="left:' + left + '%;width:' + w + '%"></div>';
       }
-      var dp = r.key === 'n_floors' ? 0 : 2;
-      h += '<div title="' + esc(SWEEP_LABELS[r.key]) + ': ' + fmt(r.lo, dp) + ' → ' + fmt(r.hi, dp) + '">' + esc(SWEEP_LABELS[r.key]) +
-        ' <span style="color:var(--ink-4)">' + fmt(r.lo, dp) + '–' + fmt(r.hi, dp) + '</span></div>' +
+      function effect(v, d) {
+        var cls = d < 0 ? 'good' : (d > 0 ? 'bad' : '');
+        return 'At ' + sweepValue(r.key, v) + ': <b class="' + cls + '">' + (d > 0 ? '+' : (d < 0 ? '−' : '')) +
+          fmt(Math.abs(d), 1) + ' tons</b>';
+      }
+      var now = sweepNow(r.key);
+      h += '<div class="tz-row"><div class="tz-name">' + esc(SWEEP_LABELS[r.key]) +
+        (now !== null ? ' <span class="tz-now">now ' + now + '</span>' : '') + '</div>' +
         '<div class="bar-wrap"><div class="axis"></div>' + bar(r.dl) + bar(r.dh) + '</div>' +
-        '<div class="num" style="text-align:right">' + fmt(r.span, 1) + '</div>';
+        '<div class="tz-meta">' + effect(r.lo, r.dl) + ' &nbsp;·&nbsp; ' + effect(r.hi, r.dh) + '</div></div>';
     });
-    return h + '</div><p class="sub" style="margin-top:8px">Bars show the low end and the high end of each input. Green = lower peak, red = higher. Right column: total swing (tons).</p></div>';
+    return h + '</div></div>';
   }
+
+  // Display a swept input value in everyday units.
+  function sweepValue(key, v) {
+    if (key === 'wwr') return fmt(v * 100, 0) + '%';
+    if (key === 'erv_sensible_eff' || key === 'erv_latent_eff') return fmt(v * 100, 0) + '%';
+    if (key === 'overhang_pf') return fmt(v, 2);
+    if (key === 'oa_multiplier') return fmt(v, 2) + '× code rate';
+    if (key === 'oa_ach') return fmt(v, 1) + ' ACH';
+    if (key === 'infiltration_ach') return fmt(v, 2) + ' ACH';
+    if (key === 'lpd_w_m2' || key === 'epd_w_m2') return fmt(v, 1) + ' W/m²';
+    if (key === 't_cool_c' || key === 't_heat_c') return fmt(v, 1) + ' °C';
+    if (key === 'm2_per_person') return fmt(v, 1) + ' m²/person';
+    if (key === 'n_floors') return fmt(v, 0) + ' floors';
+    if (key === 'north_axis_deg') return fmt(v, 0) + '°';
+    if (key === 'wall_u' || key === 'roof_u' || key === 'win_u') return 'U-' + fmt(v, 2);
+    return fmt(v, 2);
+  }
+
+  function sweepNow(key) {
+    var sc = S.sc, def = S.defaults;
+    if (key === 'oa_multiplier') {
+      if (def.oa_per_person_ls > 0) return sweepValue(key, sc.oa_per_person_ls / def.oa_per_person_ls);
+      if (def.oa_per_area_ls_m2 > 0) return sweepValue(key, sc.oa_per_area_ls_m2 / def.oa_per_area_ls_m2);
+      return null;
+    }
+    return sc[key] === undefined || sc[key] === null ? null : sweepValue(key, sc[key]);
+  }
+
 
 
   function profileSvg(profile, color, label) {
