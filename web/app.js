@@ -609,11 +609,13 @@
         if (res.model.shared) {
           h += '<div class="note info">Using the shared model trained across all building types for this station.' +
             (ho && ho.per_type && ho.per_type[S.type] ? ' Independent test for ' + esc(D.archetypes.types[S.type].label) + ': worst P95 ' +
-              fmt(ho.per_type[S.type].worst_total_p95_pct, 1) + '% - ' + (ho.per_type[S.type].passed ? 'passed' : 'FAILED') + '.' : '') + '</div>';
+              fmt(ho.per_type[S.type].worst_governing_p95_pct != null ? ho.per_type[S.type].worst_governing_p95_pct
+                : ho.per_type[S.type].worst_total_p95_pct, 1) + '% - ' + (ho.per_type[S.type].passed ? 'passed' : 'FAILED') + '.' : '') + '</div>';
         }
         if (ho) {
           h += '<div class="note ' + (ho.passed ? 'info' : 'bad') + '">Independent test against ' + ho.n +
-            ' fresh EnergyPlus runs: worst 95th-percentile error ' + fmt(ho.worst_total_p95_pct, 1) + '% (limit ' +
+            ' fresh EnergyPlus runs: worst 95th-percentile error on the reported peaks ' +
+            fmt(ho.worst_governing_p95_pct != null ? ho.worst_governing_p95_pct : ho.worst_total_p95_pct, 1) + '% (limit ' +
             fmt(ho.threshold_pct, 1) + '%) - ' + (ho.passed ? 'passed' : 'FAILED; treat these estimates with caution') + '.</div>';
         } else {
           h += '<div class="note warn">Not yet tested against independent EnergyPlus runs (run engine/validate.py).</div>';

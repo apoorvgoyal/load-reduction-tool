@@ -14,10 +14,12 @@ Usage:
   python3 engine/validate.py                                  # every trained model
   python3 engine/validate.py --types office --stations chicago --n 50
   python3 engine/validate.py --skip-run                       # re-score existing test runs only
-  python3 engine/validate.py --threshold 5                    # worst P95 % on block totals
+  python3 engine/validate.py --threshold 5                    # worst P95 % on the reported peaks
 
-The default threshold is 5%: the worst 95th-percentile absolute error across
-every design day's block total (cooling and heating) must not exceed it.
+The default threshold is 5%: the worst 95th-percentile absolute error on the
+peaks the page reports must not exceed it - the governing cooling peak for each
+percentile (larger of the dry-bulb and dew-point days) and the heating peak for
+each percentile. Every individual design day is also scored, for information.
 """
 import argparse
 import datetime
@@ -105,15 +107,54 @@ def score(model, recs, threshold):
     totals = {k: v for k, v in per_output.items() if k.endswith('|total_w_m2') and v['p95_abs_pct'] is not None}
     worst_key = max(totals, key=lambda k: totals[k]['p95_abs_pct']) if totals else None
     worst = totals[worst_key]['p95_abs_pct'] if worst_key else None
+    governing = governing_errors(model, recs)
+    gov = {k: v for k, v in governing.items() if v['p95_abs_pct'] is not None}
+    gov_key = max(gov, key=lambda k: gov[k]['p95_abs_pct']) if gov else None
+    gov_worst = gov[gov_key]['p95_abs_pct'] if gov_key else None
     return {
         'n_cases': len(recs),
         'cases_outside_trained_range': extrap_cases,
+        # Pass rule: the peaks the page reports (governing cooling day per
+        # percentile, heating per percentile).
+        'worst_governing_p95_pct': gov_worst,
+        'worst_governing_output': gov_key,
+        'governing': governing,
+        # For information: every design day judged on its own value, including
+        # mild days that never govern and can sit near zero.
         'worst_total_p95_pct': worst,
         'worst_total_output': worst_key,
         'threshold_pct': threshold,
-        'passed': worst is not None and worst <= threshold,
+        'passed': gov_worst is not None and gov_worst <= threshold,
         'per_output': per_output,
     }
+
+
+GOVERNING = {
+    'cooling 0.4%': (['clg_db_0.4', 'clg_dp_0.4']), 'cooling 1%': (['clg_db_1', 'clg_dp_1']),
+    'cooling 2%': (['clg_db_2', 'clg_dp_2']), 'heating 99.6%': (['htg_99.6']), 'heating 99%': (['htg_99']),
+}
+
+
+def governing_errors(model, recs):
+    """Error on the peak the page shows: the larger of the dry-bulb and dew-point
+    cooling days (as EnergyPlus and the model each see it), and the heating day.
+    A wrong prediction that flips which cooling day governs is caught here,
+    because the model's own maximum is compared with EnergyPlus's maximum."""
+    out = {}
+    for label, days in GOVERNING.items():
+        pct = []
+        for r in recs:
+            pred, _ = surrogate.predict(model, r['scenario'])
+            keys = [d + '|total_w_m2' for d in days]
+            if not all(k in r['targets'] and k in pred for k in keys):
+                continue
+            y = max(r['targets'][k] for k in keys)
+            p = max(pred[k] for k in keys)
+            if y > 1e-9:
+                pct.append(abs(p - y) / y * 100)
+        out[label] = {'n': len(pct), 'p50_abs_pct': _pct(pct, 50), 'p95_abs_pct': _pct(pct, 95),
+                      'max_abs_pct': max(pct) if pct else None}
+    return out
 
 
 def default_case_row(model, recs):
@@ -138,35 +179,39 @@ def write_report(results, path_md, path_json):
              'Generated %s by `engine/validate.py`. Each model is tested on EnergyPlus runs it was not trained on '
              '(independent Latin-hypercube sample, seed %d, plus the building type default).' % (
                  results['generated'], results['seed']), '',
-             'Pass rule: worst 95th-percentile absolute error across all design-day block totals <= %.1f%%.' %
-             results['threshold_pct'], '',
-             '| Model | Test runs | Worst P95 (block totals) | Worst output | Cooling 0.4%% DB P95 | Heating 99.6%% P95 | Result |',
-             '|---|---|---|---|---|---|---|']
+             'Pass rule: worst 95th-percentile absolute error on the peaks the page reports <= %.1f%%. Those are '
+             'the governing cooling peak for each percentile (the larger of the dry-bulb and dew-point days, as EnergyPlus '
+             'and the model each see it) and the heating peak for each percentile. "Any single day" judges every design '
+             'day on its own value, including mild days that never govern and can sit near zero; it is shown for '
+             'information.' % results['threshold_pct'], '',
+             '| Model | Test runs | Worst P95, reported peaks | Which peak | Cooling 0.4% | Heating 99.6% | Any single day (info) | Result |',
+             '|---|---|---|---|---|---|---|---|']
+
+    def row(label, r):
+        gv = r.get('governing', {})
+        g = lambda k: ('%.1f%%' % gv[k]['p95_abs_pct']) if k in gv and gv[k]['p95_abs_pct'] is not None else '–'
+        f = lambda v: ('%.1f%%' % v) if v is not None else '–'
+        return '| %s | %d | %s | %s | %s | %s | %s | %s |' % (
+            label, r['n_cases'], f(r.get('worst_governing_p95_pct')), r.get('worst_governing_output') or '–',
+            g('cooling 0.4%'), g('heating 99.6%'), f(r.get('worst_total_p95_pct')),
+            'PASS' if r['passed'] else '**FAIL**')
+
     for key, r in sorted(results['models'].items()):
         if 'error' in r:
-            lines.append('| %s | – | – | – | – | – | %s |' % (key, r['error']))
+            lines.append('| %s | – | – | – | – | – | – | %s |' % (key, r['error']))
             continue
-        po = r['per_output']
-        g = lambda k: ('%.1f%%' % po[k]['p95_abs_pct']) if k in po and po[k]['p95_abs_pct'] is not None else '–'
-        lines.append('| %s | %d | %s | %s | %s | %s | %s |' % (
-            key, r['n_cases'], ('%.1f%%' % r['worst_total_p95_pct']) if r['worst_total_p95_pct'] is not None else '–',
-            r['worst_total_output'] or '–', g('clg_db_0.4|total_w_m2'), g('htg_99.6|total_w_m2'),
-            'PASS' if r['passed'] else '**FAIL**'))
+        lines.append(row(key, r) if not r.get('per_type') else row(key, dict(r, governing={})))
     shared = {k: r for k, r in results['models'].items() if r.get('per_type')}
     if shared:
         lines += ['', '## Shared models by building type', '',
-                  '| Model | Building type | Test runs | Worst P95 (block totals) | Cooling 0.4%% DB P95 | Heating 99.6%% P95 | Result |',
-                  '|---|---|---|---|---|---|---|']
+                  '| Model @ type | Test runs | Worst P95, reported peaks | Which peak | Cooling 0.4% | Heating 99.6% | Any single day (info) | Result |',
+                  '|---|---|---|---|---|---|---|---|']
         for key, r in sorted(shared.items()):
             for t, x in sorted(r['per_type'].items()):
                 if 'error' in x:
-                    lines.append('| %s | %s | – | – | – | – | %s |' % (key, t, x['error']))
+                    lines.append('| %s @ %s | – | – | – | – | – | – | %s |' % (key, t, x['error']))
                     continue
-                po = x['per_output']
-                g = lambda k: ('%.1f%%' % po[k]['p95_abs_pct']) if k in po and po[k]['p95_abs_pct'] is not None else '–'
-                lines.append('| %s | %s | %d | %.1f%% | %s | %s | %s |' % (
-                    key, t, x['n_cases'], x['worst_total_p95_pct'], g('clg_db_0.4|total_w_m2'),
-                    g('htg_99.6|total_w_m2'), 'PASS' if x['passed'] else '**FAIL**'))
+                lines.append(row('%s @ %s' % (key, t), x))
     lines += ['', '## Type defaults (prediction vs EnergyPlus)', '',
               '| Model | Output | EnergyPlus W/m² | Surrogate W/m² | Error |', '|---|---|---|---|---|']
     for key, r in sorted(results['models'].items()):
@@ -244,12 +289,14 @@ def main(argv):
             results['models'][key] = {'error': err, 'passed': False}
             print('%s: %s' % (key, err))
             continue
-        worst_t = max(scored, key=lambda t: scored[t]['worst_total_p95_pct'] or 0)
+        worst_t = max(scored, key=lambda t: scored[t]['worst_governing_p95_pct'] or 0)
         r = dict(scored[worst_t]) if len(test_types) == 1 else {
             'n_cases': sum(x['n_cases'] for x in scored.values()),
             'cases_outside_trained_range': sum(x['cases_outside_trained_range'] for x in scored.values()),
-            'worst_total_p95_pct': scored[worst_t]['worst_total_p95_pct'],
-            'worst_total_output': '%s @ %s' % (scored[worst_t]['worst_total_output'], worst_t),
+            'worst_governing_p95_pct': scored[worst_t]['worst_governing_p95_pct'],
+            'worst_governing_output': '%s @ %s' % (scored[worst_t]['worst_governing_output'], worst_t),
+            'worst_total_p95_pct': max(x['worst_total_p95_pct'] or 0 for x in scored.values()),
+            'worst_total_output': None,
             'threshold_pct': a.threshold,
             'passed': all(x.get('passed') for x in per_type.values()),
             'per_output': score(model, all_recs, a.threshold)['per_output'],
@@ -257,18 +304,19 @@ def main(argv):
         }
         r['eplus_versions'] = sorted(set(x.get('eplus') or '' for x in all_recs))
         results['models'][key] = r
-        print('%s: %d test runs, worst P95 on block totals %.1f%% (%s) -> %s' % (
-            key, r['n_cases'], r['worst_total_p95_pct'], r['worst_total_output'], 'PASS' if r['passed'] else 'FAIL'),
-            flush=True)
+        print('%s: %d test runs, worst P95 on reported peaks %.1f%% (%s) -> %s   [any single design day: %.1f%%]' % (
+            key, r['n_cases'], r['worst_governing_p95_pct'], r['worst_governing_output'],
+            'PASS' if r['passed'] else 'FAIL', r['worst_total_p95_pct'] or 0), flush=True)
         for t, x in sorted(per_type.items()) if len(test_types) > 1 else []:
-            print('    %-11s %s' % (t, ('worst P95 %.1f%% -> %s' % (x['worst_total_p95_pct'], 'PASS' if x['passed'] else 'FAIL'))
+            print('    %-11s %s' % (t, ('worst P95 %.1f%% -> %s' % (x['worst_governing_p95_pct'], 'PASS' if x['passed'] else 'FAIL'))
                                   if 'error' not in x else x['error']), flush=True)
         if not a.no_write:
             model['holdout'] = {
                 'n': r['n_cases'], 'seed': a.seed, 'tested_at': results['generated'],
+                'worst_governing_p95_pct': r['worst_governing_p95_pct'],
                 'worst_total_p95_pct': r['worst_total_p95_pct'], 'threshold_pct': a.threshold, 'passed': r['passed'],
                 'total_p95_pct': {k: v['p95_abs_pct'] for k, v in r['per_output'].items() if k.endswith('|total_w_m2')},
-                'per_type': {t: {'worst_total_p95_pct': x.get('worst_total_p95_pct'), 'passed': x.get('passed', False)}
+                'per_type': {t: {'worst_governing_p95_pct': x.get('worst_governing_p95_pct'), 'passed': x.get('passed', False)}
                              for t, x in per_type.items()} if len(test_types) > 1 else None,
             }
     write_report(results, os.path.join(REPORT_DIR, 'report.md'), os.path.join(REPORT_DIR, 'report.json'))
