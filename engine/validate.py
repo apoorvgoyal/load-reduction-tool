@@ -234,7 +234,8 @@ def main(argv):
     ap.add_argument('--threshold', type=float, default=5.0)
     ap.add_argument('--workers', type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument('--skip-run', action='store_true', help='score existing test runs only; run nothing')
-    ap.add_argument('--no-write', action='store_true', help="don't record results in loads-surrogate.js")
+    ap.add_argument('--no-write', action='store_true',
+                    help="write nothing: no report files and no results recorded in loads-surrogate.js")
     a = ap.parse_args(argv)
     if a.seed == 1:
         sys.exit('Seed 1 is the training seed; pick another so the test set is independent.')
@@ -319,12 +320,12 @@ def main(argv):
                 'per_type': {t: {'worst_governing_p95_pct': x.get('worst_governing_p95_pct'), 'passed': x.get('passed', False)}
                              for t, x in per_type.items()} if len(test_types) > 1 else None,
             }
-    write_report(results, os.path.join(REPORT_DIR, 'report.md'), os.path.join(REPORT_DIR, 'report.json'))
     if not a.no_write:
+        write_report(results, os.path.join(REPORT_DIR, 'report.md'), os.path.join(REPORT_DIR, 'report.json'))
         surrogate.write_published(SURROGATE_JS, payload)
     n_fail = sum(1 for r in results['models'].values() if not r.get('passed'))
-    print('%d of %d models passed. Report: %s' % (len(results['models']) - n_fail, len(results['models']),
-                                                  os.path.join(REPORT_DIR, 'report.md')))
+    print('%d of %d models passed.%s' % (len(results['models']) - n_fail, len(results['models']),
+                                         '' if a.no_write else ' Report: ' + os.path.join(REPORT_DIR, 'report.md')))
     return 1 if n_fail else 0
 
 
