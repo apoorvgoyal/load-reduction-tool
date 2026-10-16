@@ -12,6 +12,13 @@
   var SUR = window.LOADS_SURROGATE_MODELS = window.LOADS_SURROGATE_MODELS ||
     ((window.LOADS_SURROGATE && window.LOADS_SURROGATE.models) || {});
   var SUR_LOADING = {};
+  // A building-type model if one was trained, else the shared model for the station.
+  function modelKeyFor(type, station) {
+    var k = type + '|' + station;
+    if (SUR_INDEX[k] || SUR[k]) return k;
+    k = 'unified|' + station;
+    return (SUR_INDEX[k] || SUR[k]) ? k : null;
+  }
   function loadModel(key) {
     if (SUR[key] || !SUR_INDEX[key] || SUR_LOADING[key]) return;
     SUR_LOADING[key] = true;
@@ -113,7 +120,7 @@
 
   // ── State ───────────────────────────────────────────────────────────────
   var S = {type: 'office', station: 'chicago', coolPct: '0.4', heatPct: '99.6',
-    sc: null, prov: null, verify: null, defaults: null, baseline: null, ep: null, open: {},
+    sc: null, prov: null, verify: null, defaults: null, baseline: null, ep: null, open: {}, tzLoad: 'cooling',
     costTon: '', costMbh: '', engine: null, running: false, runError: null};
 
   function stationById(id) {
@@ -182,8 +189,8 @@
   // Result for a scenario: a matching EnergyPlus run wins, else the surrogate.
   function resultFor(sc, epRun) {
     if (epRun && epRun.hash === scenarioHash(sc)) return C.energyplusResult(epRun.run);
-    var key = sc.type + '|' + sc.station, m = SUR[key];
-    if (!m && SUR_INDEX[key]) {
+    var key = modelKeyFor(sc.type, sc.station), m = key && SUR[key];
+    if (!m && key && SUR_INDEX[key]) {
       loadModel(key);
       return {source: 'none', reason: SUR_LOADING[key] === 'error' ? 'load-error' : 'loading'};
     }
@@ -292,11 +299,12 @@
 
   // ── Rendering: results ──────────────────────────────────────────────────
   function renderStatus() {
-    var e = S.engine, m = SUR_INDEX[S.type + '|' + S.station], h = '';
+    var mk = modelKeyFor(S.type, S.station), e = S.engine, m = mk && SUR_INDEX[mk], h = '';
     if (e === null) h += '<span class="pill"><span class="dot"></span>EnergyPlus: checking…</span>';
     else if (e.available) h += '<span class="pill ok"><span class="dot"></span>EnergyPlus ' + esc(e.version) + ' online</span>';
     else h += '<span class="pill off" title="' + esc(e.reason || '') + '"><span class="dot"></span>EnergyPlus offline</span>';
-    if (m) h += '<span class="pill ok"><span class="dot"></span>Surrogate: ' + m.n_samples + ' runs</span>';
+    if (m) h += '<span class="pill ok"><span class="dot"></span>Surrogate' + (mk.indexOf('unified|') === 0 ? ' (shared, all types)' : '') +
+      ': ' + m.n_samples + ' runs</span>';
     else h += '<span class="pill off"><span class="dot"></span>Surrogate: not trained for this type/station</span>';
     document.getElementById('status').innerHTML = h;
   }
@@ -413,13 +421,18 @@
   }
 
   function tornadoCard(g) {
-    var m = SUR[S.type + '|' + S.station];
-    if (!m || !g || !g.cKey) return '';
-    var out = g.cKey + '|total_w_m2';
+    var mk = modelKeyFor(S.type, S.station), m = mk && SUR[mk];
+    var heating = S.tzLoad === 'heating';
+    var ddKey = heating ? g && g.hKey : g && g.cKey;
+    if (!m || !ddKey) return '';
+    var out = ddKey + '|total_w_m2';
     if (!m.outputs[out]) return '';
     var space = D.design_space.sampled, sc0 = S.sc, def = S.defaults;
     var base = C.predict(m, sc0).perM2[out];
-    var conv = sc0.gfa_m2 / 1000 / C.KW_PER_TON * sc0.cooling_sizing_factor;
+    // Cooling in tons, heating in MBH; sizing factors applied as in the results.
+    var unit = heating ? 'MBH' : 'tons', dp = heating ? 0 : 1;
+    var conv = heating ? sc0.gfa_m2 / 1000 * C.MBH_PER_KW * sc0.heating_sizing_factor
+      : sc0.gfa_m2 / 1000 / C.KW_PER_TON * sc0.cooling_sizing_factor;
     function at(key, v) {
       var sc = JSON.parse(JSON.stringify(sc0));
       if (key === 'oa_multiplier') {
@@ -447,13 +460,22 @@
       var dl = at(key, lo), dh = at(key, hi);
       rows.push({key: key, lo: lo, hi: hi, dl: dl, dh: dh, span: Math.abs(dh - dl)});
     });
-    rows = rows.sort(function (a, b) { return b.span - a.span; }).slice(0, 10);
+    // Inputs with no effect (e.g. lighting on the heating design day) are left out.
+    var small = heating ? 0.5 : 0.05;
+    rows = rows.filter(function (r) { return r.span >= small; })
+      .sort(function (a, b) { return b.span - a.span; }).slice(0, 10);
     var mx = Math.max.apply(null, rows.map(function (r) { return Math.max(Math.abs(r.dl), Math.abs(r.dh)); })) || 1;
-    var h = '<div class="card"><h2>Which inputs move the cooling peak most</h2>' +
+    var load = heating ? 'heating' : 'cooling';
+    var h = '<div class="card"><div class="card-head"><h2>Which inputs move the ' + load + ' peak most</h2>' +
+      '<div class="seg" data-seg="tzLoad">' +
+      '<button type="button" data-v="cooling"' + (heating ? '' : ' class="on"') + '>Cooling</button>' +
+      '<button type="button" data-v="heating"' + (heating ? ' class="on"' : '') + '>Heating</button></div></div>' +
       '<p class="sub">Each row tries one input at the low and high end of its realistic range, with everything else ' +
       'kept as you have set it. The longest bars are your biggest levers. <span style="color:var(--good)">Green</span> = ' +
-      'peak cooling goes down, <span style="color:var(--bad)">red</span> = it goes up. These are fast estimates; confirm ' +
-      'a chosen option with Run EnergyPlus.</p><div class="tz">';
+      'peak ' + load + ' goes down, <span style="color:var(--bad)">red</span> = it goes up. These are fast estimates; confirm ' +
+      'a chosen option with Run EnergyPlus.' +
+      (heating ? ' The heating design day assumes no sun and no people, lighting or equipment, so those inputs do not appear.' : '') +
+      '</p><div class="tz">';
     rows.forEach(function (r) {
       function bar(d) {
         var w = Math.abs(d) / mx * 50, left = d < 0 ? 50 - w : 50;
@@ -462,7 +484,7 @@
       function effect(v, d) {
         var cls = d < 0 ? 'good' : (d > 0 ? 'bad' : '');
         return 'At ' + sweepValue(r.key, v) + ': <b class="' + cls + '">' + (d > 0 ? '+' : (d < 0 ? '−' : '')) +
-          fmt(Math.abs(d), 1) + ' tons</b>';
+          fmt(Math.abs(d), dp) + ' ' + unit + '</b>';
       }
       var now = sweepNow(r.key);
       h += '<div class="tz-row"><div class="tz-name">' + esc(SWEEP_LABELS[r.key]) +
@@ -584,6 +606,11 @@
         h += '<div class="note info">Surrogate trained on ' + res.model.n + ' EnergyPlus runs. Out-of-sample error (95th percentile): ' +
           fmt(g.errC, 1) + '% cooling, ' + fmt(g.errH, 1) + '% heating. Run EnergyPlus for numbers to put in a basis of design.</div>';
         var ho = res.model.holdout;
+        if (res.model.shared) {
+          h += '<div class="note info">Using the shared model trained across all building types for this station.' +
+            (ho && ho.per_type && ho.per_type[S.type] ? ' Independent test for ' + esc(D.archetypes.types[S.type].label) + ': worst P95 ' +
+              fmt(ho.per_type[S.type].worst_total_p95_pct, 1) + '% - ' + (ho.per_type[S.type].passed ? 'passed' : 'FAILED') + '.' : '') + '</div>';
+        }
         if (ho) {
           h += '<div class="note ' + (ho.passed ? 'info' : 'bad') + '">Independent test against ' + ho.n +
             ' fresh EnergyPlus runs: worst 95th-percentile error ' + fmt(ho.worst_total_p95_pct, 1) + '% (limit ' +

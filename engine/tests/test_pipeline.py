@@ -47,6 +47,18 @@ class PipelineTests(unittest.TestCase):
                            capture_output=True, text=True, env=env)
         self.assertEqual(json.loads(p.stdout)['code'], 'no_engine')
 
+    def test_unified_samples_valid_and_cover_all_types(self):
+        import batch
+        from lib import features, scenario
+        s = batch.make_samples_unified('miami', 400, 1)
+        self.assertEqual(s, batch.make_samples_unified('miami', 400, 1))
+        self.assertEqual(sorted(i for i, _, _ in s), list(range(400)))
+        comps = {c for _, _, c in s}
+        self.assertEqual(comps, set(scenario.load_archetypes()['types']) | {'wide'})
+        for _, user, _ in s:
+            sc, _ = scenario.resolve(user, '1A')
+            self.assertEqual(len(features.features(sc)), len(features.FEATURES))
+
     def test_batch_samples_are_valid_and_deterministic(self):
         import batch
         from lib import scenario

@@ -77,7 +77,7 @@ def stats(y, pred):
     }
 
 
-def fit_file(paths, k=5, min_samples=100):
+def fit_file(paths, k=5, min_samples=100, btype=None):
     """Fit one type x station from one result file or a list of them (shards)."""
     recs = runs.load([paths] if isinstance(paths, str) else paths)
     if len(recs) < min_samples:
@@ -110,11 +110,18 @@ def fit_file(paths, k=5, min_samples=100):
     sc0 = recs[0]['scenario']
     fixed = {}
     with open(os.path.join(HERE, 'variables.json')) as f:
-        fixed_keys = json.load(f)['fixed_inputs']
+        cfg = json.load(f)
+    unified = btype == 'unified'
+    # The shared model varies schedules, so fewer inputs are held fixed.
+    fixed_keys = cfg['unified']['fixed_inputs'] if unified else cfg['fixed_inputs']
     for kname in fixed_keys:
         fixed[kname] = sc0.get(kname)
+    components = {}
+    for r in recs:
+        components[r.get('component', sc0['type'])] = components.get(r.get('component', sc0['type']), 0) + 1
     return {
-        'type': sc0['type'], 'station': sc0['station'], 'climate_zone': sc0['climate_zone'],
+        'type': 'unified' if unified else sc0['type'], 'station': sc0['station'],
+        'components': components, 'climate_zone': sc0['climate_zone'],
         'n_samples': len(recs),
         'eplus_versions': sorted(set(r.get('eplus') or '' for r in recs)),
         'samples_with_severe_errors': sum(1 for r in recs if r.get('severe')),
@@ -149,7 +156,7 @@ def main(argv):
         todo = [p for p in todo if ('%s__%s' % p).startswith(a.only)]
     for btype, station in todo:
         files = runs.files_for(runs_dir, btype, station)
-        m, why = fit_file(files, a.folds, a.min_samples)
+        m, why = fit_file(files, a.folds, a.min_samples, btype=btype)
         key = '%s|%s' % (btype, station)
         if not m:
             print('skip %s: %s' % (key, why))

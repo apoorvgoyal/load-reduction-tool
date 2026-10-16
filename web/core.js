@@ -13,7 +13,8 @@
     'slab_fp_per_m2', 'infiltration_m3h_per_m2', 'solar_aperture_per_m2', 'shaded_aperture_per_m2',
     'oa_ls_m2', 'oa_after_sensible_hr', 'oa_after_latent_hr',
     'lpd_w_m2', 'epd_w_m2', 'people_per_m2', 't_cool_c', 't_heat_c', 'core_fraction',
-    'orient_cos2', 'orient_sin2', 'aspect_ratio'];
+    'orient_cos2', 'orient_sin2', 'aspect_ratio',
+    'occ_hours_frac', 'occ_peak_overlap', 'occ_overnight'];
 
   // Placeholders for project geometry with no standard default (scenario.py).
   var PLACEHOLDERS = {gfa_m2: 10000, n_floors: 4, aspect_ratio: 1.5, north_axis_deg: 0, overhang_pf: 0,
@@ -58,11 +59,17 @@
     var core = Math.max(0, width - 2 * d) * Math.max(0, length - 2 * d) / a;
     var th = sc.north_axis_deg * Math.PI / 180;
     var aperture = sc.shgc * sc.wwr * ew;
+    // Schedule shape (engine/lib/features.py): occupied share of the day, of
+    // 12:00-18:00 and of 00:00-06:00.
+    var occ = {}, nOcc = 0, nPeak = 0, nNight = 0, i;
+    for (i = 0; i < (+sc.occ_hours); i++) occ[((+sc.occ_start_h) + i) % 24] = true;
+    for (i = 0; i < 24; i++) if (occ[i]) { nOcc++; if (i >= 12 && i < 18) nPeak++; if (i < 6) nNight++; }
     return [ew, sc.wwr * ew, sc.wall_u * (1 - sc.wwr) * ew, sc.win_u * sc.wwr * ew, sc.roof_u / n,
       sc.slab_f_factor_w_mk * perim / gfa, sc.infiltration_ach * h, aperture, aperture * sc.overhang_pf,
       oa, oa * (1 - sc.erv_sensible_eff), oa * (1 - sc.erv_latent_eff),
       sc.lpd_w_m2, sc.epd_w_m2, ppl, sc.t_cool_c, sc.t_heat_c, core,
-      Math.cos(2 * th), Math.sin(2 * th), sc.aspect_ratio];
+      Math.cos(2 * th), Math.sin(2 * th), sc.aspect_ratio,
+      nOcc / 24, nPeak / 6, nNight / 6];
   }
 
   function expand(z) {
@@ -130,7 +137,8 @@
     });
     return {source: 'surrogate', gfa: gfa, dd: dd, extrapolated: p.extrapolated, fixedDiffs: p.fixedDiffs,
       incompatible: !!p.incompatible,
-      model: {n: model.n_samples, eplus: model.eplus_versions, fitted: model.fitted_at, holdout: model.holdout || null}};
+      model: {n: model.n_samples, eplus: model.eplus_versions, fitted: model.fitted_at, holdout: model.holdout || null,
+        shared: model.type === 'unified'}};
   }
 
   // Convert an EnergyPlus run (engine/run_scenario.py JSON) into the same shape.
