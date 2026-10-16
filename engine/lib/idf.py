@@ -213,11 +213,12 @@ def build(sc, ddy, stat, eplus_version='25.2'):
         ('Name', 'Load tool %s' % sc['type']),
         ('North Axis', float(sc['north_axis_deg'])),
         ('Terrain', 'Suburbs'),
-        # Warm-up load tolerance is an absolute value in W per zone. The 0.04 W
-        # default failed on large, fully adiabatic middle-floor core zones
-        # (observed 0.127 W day-to-day change on a ~3,000 m2 core: negligible).
-        # 0.5 W is the IDD maximum; 50 days gives heavy cores more room.
-        ('Loads Convergence Tolerance Value', 0.5),
+        # Keep EnergyPlus's default warm-up tolerances: loosening the loads
+        # tolerance to 0.5 W let warm-up stop early and moved heating peaks by
+        # up to 1.7% on concrete-slab models. Large fully-adiabatic middle-floor
+        # cores need more than the default 25 warm-up days to meet 0.04 W; 50
+        # days converges them (checked against the same runs on 25 and 100).
+        ('Loads Convergence Tolerance Value', 0.04),
         ('Temperature Convergence Tolerance Value', 0.4),
         ('Solar Distribution', 'FullInteriorAndExterior'),
         ('Maximum Number of Warmup Days', 50),
