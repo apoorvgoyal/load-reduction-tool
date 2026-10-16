@@ -93,6 +93,14 @@ python3 engine/batch.py --types all --stations all --n 5000 --shard 2/4    # PC 
 
 **Suggested order:** finish one model to 5,000 runs and validate it before committing the full compute. Then prioritise the building types and cities you use most.
 
+### One shared model for all building types? (tested: not yet)
+
+`batch.py --types unified` trains one model across every building type's range, with schedules varied. Tested on Chicago with 3,000 runs against 459 independent EnergyPlus runs:
+- heating is excellent (≤0.7% error);
+- cooling on the humid dew-point design day fails (11–29%), so per-type models remain the recommended approach.
+
+The office-only model passed the same test at 3.4%. Details: `docs/experiments/2026-10-shared-design-space.md`.
+
 ### Automatic testing against EnergyPlus
 
 ```bash
