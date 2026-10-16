@@ -132,12 +132,19 @@ table.t td.num { font-family: var(--mono); }
 .note.info { background: var(--surface-2); color: var(--ink-2); }
 .note code, .sub code { font-family: var(--mono); font-size: 11.5px; }
 
-.tornado { display: grid; grid-template-columns: 170px 1fr 70px; gap: 4px 10px; align-items: center; font-size: 12px; }
-.tornado .bar-wrap { position: relative; height: 14px; }
-.tornado .axis { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--border-strong); }
-.tornado .bar { position: absolute; top: 2px; height: 10px; border-radius: 2px; }
-.tornado .bar.neg { background: var(--good); }
-.tornado .bar.pos { background: var(--bad); }
+.tz { display: flex; flex-direction: column; gap: 12px; }
+.tz-row { display: flex; flex-direction: column; gap: 3px; }
+.tz-name { font-size: 13px; font-weight: 600; }
+.tz-now { font-weight: 400; color: var(--ink-3); font-size: 12px; margin-left: 4px; }
+.tz-meta { font-size: 12px; color: var(--ink-3); }
+.tz-meta b { font-family: var(--mono); font-weight: 600; }
+.tz-meta b.good { color: var(--good); }
+.tz-meta b.bad { color: var(--bad); }
+.tz .bar-wrap { position: relative; height: 14px; background: var(--surface-2); border-radius: 3px; }
+.tz .axis { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--ink-4); }
+.tz .bar { position: absolute; top: 2px; height: 10px; border-radius: 2px; }
+.tz .bar.neg { background: var(--good); }
+.tz .bar.pos { background: var(--bad); }
 
 .chart svg { width: 100%; height: auto; display: block; }
 .chart text { fill: var(--ink-3); font: 10px var(--sans); }
@@ -147,5 +154,4 @@ table.t td.num { font-family: var(--mono); }
   .layout { grid-template-columns: 1fr; padding: 16px; }
   .inputs { position: static; max-height: none; }
   .top { padding: 12px 16px; }
-  .tornado { grid-template-columns: 110px 1fr 56px; }
 }
