@@ -117,5 +117,68 @@
   "post_processed": [
     "cooling_sizing_factor",
     "heating_sizing_factor"
-  ]
+  ],
+  "unified": {
+    "_readme": "One shared design space for all building types (model key 'unified|<station>'). A share of samples is drawn around each building type's preset exactly as for a per-type model; the rest are spread across the combined range of every type, with schedules varied too, so in-between buildings are covered.",
+    "preset_share": 0.7,
+    "wide": {
+      "m2_per_person": {
+        "log_min": 0.31,
+        "log_max": 80.0
+      },
+      "lpd_w_m2": {
+        "min": 2.5,
+        "max": 22.0
+      },
+      "epd_w_m2": {
+        "log_min": 2.0,
+        "log_max": 100.0
+      },
+      "oa_per_person_ls": {
+        "min": 0.0,
+        "max": 20.0
+      },
+      "oa_per_area_ls_m2": {
+        "min": 0.0,
+        "max": 1.8
+      },
+      "oa_ach": {
+        "min": 0.0,
+        "max": 12.0,
+        "zero_share": 0.5,
+        "_note": "half the wide samples use no air-change outdoor air"
+      },
+      "t_cool_c": {
+        "min": 20.0,
+        "max": 28.0
+      },
+      "t_heat_c": {
+        "min": 15.0,
+        "max": 23.0,
+        "_note": "capped at 1 C below the sampled cooling setpoint"
+      },
+      "occ_start_h": {
+        "min": 0,
+        "max": 23,
+        "int": true
+      },
+      "occ_hours": {
+        "min": 4,
+        "max": 24,
+        "int": true
+      }
+    },
+    "fixed_inputs": [
+      "floor_to_floor_m",
+      "perimeter_depth_m",
+      "activity_w_per_person",
+      "unoccupied_internal_fraction",
+      "cooling_supply_air_c",
+      "heating_supply_air_c",
+      "slab_f_factor_w_mk",
+      "thermal_mass",
+      "setback_heat_c",
+      "setup_cool_c"
+    ]
+  }
 }

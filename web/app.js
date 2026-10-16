@@ -12,6 +12,13 @@
   var SUR = window.LOADS_SURROGATE_MODELS = window.LOADS_SURROGATE_MODELS ||
     ((window.LOADS_SURROGATE && window.LOADS_SURROGATE.models) || {});
   var SUR_LOADING = {};
+  // A building-type model if one was trained, else the shared model for the station.
+  function modelKeyFor(type, station) {
+    var k = type + '|' + station;
+    if (SUR_INDEX[k] || SUR[k]) return k;
+    k = 'unified|' + station;
+    return (SUR_INDEX[k] || SUR[k]) ? k : null;
+  }
   function loadModel(key) {
     if (SUR[key] || !SUR_INDEX[key] || SUR_LOADING[key]) return;
     SUR_LOADING[key] = true;
@@ -182,8 +189,8 @@
   // Result for a scenario: a matching EnergyPlus run wins, else the surrogate.
   function resultFor(sc, epRun) {
     if (epRun && epRun.hash === scenarioHash(sc)) return C.energyplusResult(epRun.run);
-    var key = sc.type + '|' + sc.station, m = SUR[key];
-    if (!m && SUR_INDEX[key]) {
+    var key = modelKeyFor(sc.type, sc.station), m = key && SUR[key];
+    if (!m && key && SUR_INDEX[key]) {
       loadModel(key);
       return {source: 'none', reason: SUR_LOADING[key] === 'error' ? 'load-error' : 'loading'};
     }
@@ -292,11 +299,12 @@
 
   // ── Rendering: results ──────────────────────────────────────────────────
   function renderStatus() {
-    var e = S.engine, m = SUR_INDEX[S.type + '|' + S.station], h = '';
+    var mk = modelKeyFor(S.type, S.station), e = S.engine, m = mk && SUR_INDEX[mk], h = '';
     if (e === null) h += '<span class="pill"><span class="dot"></span>EnergyPlus: checking…</span>';
     else if (e.available) h += '<span class="pill ok"><span class="dot"></span>EnergyPlus ' + esc(e.version) + ' online</span>';
     else h += '<span class="pill off" title="' + esc(e.reason || '') + '"><span class="dot"></span>EnergyPlus offline</span>';
-    if (m) h += '<span class="pill ok"><span class="dot"></span>Surrogate: ' + m.n_samples + ' runs</span>';
+    if (m) h += '<span class="pill ok"><span class="dot"></span>Surrogate' + (mk.indexOf('unified|') === 0 ? ' (shared, all types)' : '') +
+      ': ' + m.n_samples + ' runs</span>';
     else h += '<span class="pill off"><span class="dot"></span>Surrogate: not trained for this type/station</span>';
     document.getElementById('status').innerHTML = h;
   }
@@ -413,7 +421,7 @@
   }
 
   function tornadoCard(g) {
-    var m = SUR[S.type + '|' + S.station];
+    var mk = modelKeyFor(S.type, S.station), m = mk && SUR[mk];
     if (!m || !g || !g.cKey) return '';
     var out = g.cKey + '|total_w_m2';
     if (!m.outputs[out]) return '';
@@ -547,6 +555,11 @@
         h += '<div class="note info">Surrogate trained on ' + res.model.n + ' EnergyPlus runs. Out-of-sample error (95th percentile): ' +
           fmt(g.errC, 1) + '% cooling, ' + fmt(g.errH, 1) + '% heating. Run EnergyPlus for numbers to put in a basis of design.</div>';
         var ho = res.model.holdout;
+        if (res.model.shared) {
+          h += '<div class="note info">Using the shared model trained across all building types for this station.' +
+            (ho && ho.per_type && ho.per_type[S.type] ? ' Independent test for ' + esc(D.archetypes.types[S.type].label) + ': worst P95 ' +
+              fmt(ho.per_type[S.type].worst_total_p95_pct, 1) + '% - ' + (ho.per_type[S.type].passed ? 'passed' : 'FAILED') + '.' : '') + '</div>';
+        }
         if (ho) {
           h += '<div class="note ' + (ho.passed ? 'info' : 'bad') + '">Independent test against ' + ho.n +
             ' fresh EnergyPlus runs: worst 95th-percentile error ' + fmt(ho.worst_total_p95_pct, 1) + '% (limit ' +

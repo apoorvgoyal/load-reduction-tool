@@ -72,6 +72,27 @@ class ValidateEndToEnd(unittest.TestCase):
         # Published layout: small index + one file per model
         self.assertTrue(os.path.exists(os.path.join(self.root, 'web', 'data', 'surrogates', 'office__chicago.js')))
 
+    def test_unified_model_validated_per_type(self):
+        p = self.py('engine/batch.py', '--types', 'unified', '--stations', 'denver', '--n', '120', '--workers', '2')
+        self.assertEqual(p.returncode, 0, p.stderr)
+        p = self.py('engine/fit_surrogate.py', '--min-samples', '50', '--only', 'unified__denver')
+        self.assertEqual(p.returncode, 0, p.stderr)
+        pub = surrogate.load_published(os.path.join(self.root, 'web', 'data', 'loads-surrogate.js'))
+        m = pub['models']['unified|denver']
+        self.assertEqual(m['type'], 'unified')
+        self.assertNotIn('occ_hours', m['fixed_inputs'])          # schedules vary in the shared model
+        self.assertIn('wide', m['components'])
+        p = self.py('engine/validate.py', '--types', 'unified', '--stations', 'denver', '--n', '2',
+                    '--threshold', '1000', '--workers', '2')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        with open(os.path.join(self.root, 'engine', 'validation', 'report.json')) as f:
+            r = json.load(f)['models']['unified|denver']
+        types = set(scenario.load_archetypes()['types'])
+        self.assertEqual(set(r['per_type']), types)
+        self.assertEqual(r['n_cases'], 3 * len(types))           # 2 sampled + default, per type
+        with open(os.path.join(self.root, 'engine', 'validation', 'report.md')) as f:
+            self.assertIn('Shared models by building type', f.read())
+
     def test_refuses_training_seed(self):
         p = self.py('engine/validate.py', '--seed', '1', '--skip-run')
         self.assertNotEqual(p.returncode, 0)

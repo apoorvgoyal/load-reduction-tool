@@ -152,12 +152,30 @@ def write_report(results, path_md, path_json):
             key, r['n_cases'], ('%.1f%%' % r['worst_total_p95_pct']) if r['worst_total_p95_pct'] is not None else '–',
             r['worst_total_output'] or '–', g('clg_db_0.4|total_w_m2'), g('htg_99.6|total_w_m2'),
             'PASS' if r['passed'] else '**FAIL**'))
+    shared = {k: r for k, r in results['models'].items() if r.get('per_type')}
+    if shared:
+        lines += ['', '## Shared models by building type', '',
+                  '| Model | Building type | Test runs | Worst P95 (block totals) | Cooling 0.4%% DB P95 | Heating 99.6%% P95 | Result |',
+                  '|---|---|---|---|---|---|---|']
+        for key, r in sorted(shared.items()):
+            for t, x in sorted(r['per_type'].items()):
+                if 'error' in x:
+                    lines.append('| %s | %s | – | – | – | – | %s |' % (key, t, x['error']))
+                    continue
+                po = x['per_output']
+                g = lambda k: ('%.1f%%' % po[k]['p95_abs_pct']) if k in po and po[k]['p95_abs_pct'] is not None else '–'
+                lines.append('| %s | %s | %d | %.1f%% | %s | %s | %s |' % (
+                    key, t, x['n_cases'], x['worst_total_p95_pct'], g('clg_db_0.4|total_w_m2'),
+                    g('htg_99.6|total_w_m2'), 'PASS' if x['passed'] else '**FAIL**'))
     lines += ['', '## Type defaults (prediction vs EnergyPlus)', '',
               '| Model | Output | EnergyPlus W/m² | Surrogate W/m² | Error |', '|---|---|---|---|---|']
     for key, r in sorted(results['models'].items()):
-        for out, v in (r.get('default_case') or {}).items():
-            lines.append('| %s | %s | %.1f | %.1f | %+.1f%% |' % (key, out, v['energyplus'], v['surrogate'],
-                                                                  v['error_pct'] or 0))
+        rows = [(key, r.get('default_case'))] if not r.get('per_type') else \
+            [('%s @ %s' % (key, t), x.get('default_case')) for t, x in sorted(r['per_type'].items())]
+        for label, dc in rows:
+            for out, v in (dc or {}).items():
+                lines.append('| %s | %s | %.1f | %.1f | %+.1f%% |' % (label, out, v['energyplus'], v['surrogate'],
+                                                                      v['error_pct'] or 0))
     with open(path_md, 'w') as f:
         f.write('\n'.join(lines) + '\n')
 
@@ -195,36 +213,63 @@ def main(argv):
 
     results = {'generated': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
                'seed': a.seed, 'threshold_pct': a.threshold, 'models': {}}
+    all_types = list(scenario.load_archetypes()['types'])
     for key in keys:
         btype, station = key.split('|')
         model = models[key]
-        cases = test_cases(btype, station, a.n, a.seed)
-        path = runs.result_file(TEST_RUNS, btype, station)
-        if not a.skip_run:
-            path, _ = ensure_runs(btype, station, cases, a.workers, exe, version)
-        wanted = {i for i, _ in cases}
-        recs = [r for r in (runs.load([path]) if os.path.exists(path) else []) if r['id'] in wanted]
-        if not recs:
-            results['models'][key] = {'error': 'no test runs', 'passed': False}
-            print('%s: no test runs' % key)
+        # A shared ('unified') model is tested on every building type's own test set.
+        test_types = all_types if btype == 'unified' else [btype]
+        per_type, all_recs = {}, []
+        for t in test_types:
+            cases = test_cases(t, station, a.n, a.seed)
+            path = runs.result_file(TEST_RUNS, t, station)
+            if not a.skip_run:
+                path, _ = ensure_runs(t, station, cases, a.workers, exe, version)
+            wanted = {i for i, _ in cases}
+            recs = [r for r in (runs.load([path]) if os.path.exists(path) else []) if r['id'] in wanted]
+            if not recs:
+                per_type[t] = {'error': 'no test runs', 'passed': False}
+                continue
+            try:
+                r = score(model, recs, a.threshold)
+            except ValueError as e:
+                per_type[t] = {'error': str(e), 'passed': False}
+                continue
+            r['default_case'] = default_case_row(model, recs)
+            per_type[t] = r
+            all_recs += recs
+        scored = {t: r for t, r in per_type.items() if 'error' not in r}
+        if not scored:
+            err = next(iter(per_type.values())).get('error', 'no test runs')
+            results['models'][key] = {'error': err, 'passed': False}
+            print('%s: %s' % (key, err))
             continue
-        try:
-            r = score(model, recs, a.threshold)
-        except ValueError as e:
-            results['models'][key] = {'error': str(e), 'passed': False}
-            print('%s: %s' % (key, e))
-            continue
-        r['default_case'] = default_case_row(model, recs)
-        r['eplus_versions'] = sorted(set(x.get('eplus') or '' for x in recs))
+        worst_t = max(scored, key=lambda t: scored[t]['worst_total_p95_pct'] or 0)
+        r = dict(scored[worst_t]) if len(test_types) == 1 else {
+            'n_cases': sum(x['n_cases'] for x in scored.values()),
+            'cases_outside_trained_range': sum(x['cases_outside_trained_range'] for x in scored.values()),
+            'worst_total_p95_pct': scored[worst_t]['worst_total_p95_pct'],
+            'worst_total_output': '%s @ %s' % (scored[worst_t]['worst_total_output'], worst_t),
+            'threshold_pct': a.threshold,
+            'passed': all(x.get('passed') for x in per_type.values()),
+            'per_output': score(model, all_recs, a.threshold)['per_output'],
+            'per_type': per_type,
+        }
+        r['eplus_versions'] = sorted(set(x.get('eplus') or '' for x in all_recs))
         results['models'][key] = r
         print('%s: %d test runs, worst P95 on block totals %.1f%% (%s) -> %s' % (
             key, r['n_cases'], r['worst_total_p95_pct'], r['worst_total_output'], 'PASS' if r['passed'] else 'FAIL'),
             flush=True)
+        for t, x in sorted(per_type.items()) if len(test_types) > 1 else []:
+            print('    %-11s %s' % (t, ('worst P95 %.1f%% -> %s' % (x['worst_total_p95_pct'], 'PASS' if x['passed'] else 'FAIL'))
+                                  if 'error' not in x else x['error']), flush=True)
         if not a.no_write:
             model['holdout'] = {
                 'n': r['n_cases'], 'seed': a.seed, 'tested_at': results['generated'],
                 'worst_total_p95_pct': r['worst_total_p95_pct'], 'threshold_pct': a.threshold, 'passed': r['passed'],
                 'total_p95_pct': {k: v['p95_abs_pct'] for k, v in r['per_output'].items() if k.endswith('|total_w_m2')},
+                'per_type': {t: {'worst_total_p95_pct': x.get('worst_total_p95_pct'), 'passed': x.get('passed', False)}
+                             for t, x in per_type.items()} if len(test_types) > 1 else None,
             }
     write_report(results, os.path.join(REPORT_DIR, 'report.md'), os.path.join(REPORT_DIR, 'report.json'))
     if not a.no_write:

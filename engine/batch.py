@@ -4,6 +4,7 @@ space in variables.json, each run through EnergyPlus.
 Usage:
   python3 engine/batch.py --types office --stations chicago,houston --n 500 --workers 4
   python3 engine/batch.py --types all --stations all --n 5000             # everything
+  python3 engine/batch.py --types unified --stations chicago --n 3000     # one shared model for all types
   python3 engine/batch.py --types all --stations all --n 5000 --shard 2/4 # this PC's quarter
 
 Sharding: with --shard K/N a machine runs only every N-th sample (ids where
@@ -19,6 +20,7 @@ if something failed.
 """
 import argparse
 import json
+import math
 import os
 import random
 import sys
@@ -80,8 +82,63 @@ def make_samples(btype, station, n, seed):
     return out
 
 
+UNIFIED = 'unified'
+
+
+def make_samples_unified(station, n, seed):
+    """Shared design space for all building types (see variables.json 'unified').
+
+    Returns [(id, user, component)] where component is the preset type a
+    sample was drawn around, or 'wide'.
+    """
+    with open(os.path.join(HERE, 'variables.json')) as f:
+        cfg = json.load(f)
+    space, uni = cfg['sampled'], cfg['unified']
+    types = list(scenario.load_archetypes()['types'])
+    n_preset = int(round(n * uni['preset_share']))
+    out = []
+    # Preset part: an equal share per type, sampled exactly like a per-type model.
+    for j, t in enumerate(types):
+        k = n_preset // len(types) + (1 if j < n_preset % len(types) else 0)
+        for _, user in make_samples(t, station, k, seed):
+            out.append((user, t))
+    # Wide part: every input across the combined range, schedules included.
+    wide = dict(uni['wide'])
+    for name, spec in space.items():
+        if name not in wide and name not in ('m2_per_person', 'lpd_w_m2', 'epd_w_m2', 'oa_multiplier', 'oa_ach',
+                                             't_cool_c', 't_heat_c'):
+            wide[name] = spec
+    names = sorted(wide)
+    rng = random.Random('%s|%s|%d|wide' % (UNIFIED, station, seed))
+    for u in lhs(n - n_preset, len(names), rng):
+        user = {'type': types[0], 'station': station}
+        for name, x in zip(names, u):
+            spec = wide[name]
+            if 'log_min' in spec:
+                val = math.exp(math.log(spec['log_min']) + (math.log(spec['log_max']) - math.log(spec['log_min'])) * x)
+            elif spec.get('int'):
+                val = int(min(spec['max'], spec['min'] + int(x * (spec['max'] - spec['min'] + 1))))
+            else:
+                val = spec['min'] + (spec['max'] - spec['min']) * x
+            user[name] = val
+        if rng.random() < uni['wide']['oa_ach'].get('zero_share', 0):
+            user['oa_ach'] = 0.0
+        user['gfa_m2'] = user.pop('floor_plate_m2') * user['n_floors']
+        user['t_heat_c'] = min(user['t_heat_c'], user['t_cool_c'] - 1.0)
+        out.append((user, 'wide'))
+    return [(i, user, comp) for i, (user, comp) in enumerate(out)]
+
+
+def samples_for(btype, station, n, seed):
+    """[(id, user, component)] for a per-type model or the unified one."""
+    if btype == UNIFIED:
+        return make_samples_unified(station, n, seed)
+    return [(i, u, btype) for i, u in make_samples(btype, station, n, seed)]
+
+
 def _work(args):
-    i, user, exe, version = args
+    i, user, exe, version = args[:4]
+    component = args[4] if len(args) > 4 else None
     try:
         r = run_scenario.run(user, exe=exe, version=version)
     except Exception as e:
@@ -94,6 +151,8 @@ def _work(args):
            'eplus': r['engine']['version'], 'warnings': r['messages']['warnings'],
            'severe': r['messages']['severe'],
            'severe_messages': r['messages'].get('severe_messages', [])[:5]}
+    if component:
+        rec['component'] = component
     return i, user, rec, None
 
 
@@ -122,7 +181,7 @@ def main(argv):
     else:
         stations = a.stations.split(',')
     types = list(scenario.load_archetypes()['types']) if a.types == 'all' else a.types.split(',')
-    unknown = [t for t in types if t not in scenario.load_archetypes()['types']]
+    unknown = [t for t in types if t not in scenario.load_archetypes()['types'] and t != UNIFIED]
     if unknown:
         sys.exit('Unknown building type(s): %s' % ', '.join(unknown))
     os.makedirs(RUNS, exist_ok=True)
@@ -132,10 +191,10 @@ def main(argv):
             path = runs.result_file(RUNS, btype, station, shard)
             # Skip ids already done in ANY file for this pair (other shards copied in).
             done = {r['id'] for r in runs.load(runs.files_for(RUNS, btype, station))}
-            samples = make_samples(btype, station, a.n, a.seed)
+            samples = samples_for(btype, station, a.n, a.seed)
             if shard:
-                samples = [(i, u) for i, u in samples if i % shard[1] == shard[0] - 1]
-            todo = [(i, u, exe, version) for i, u in samples if i not in done]
+                samples = [s for s in samples if s[0] % shard[1] == shard[0] - 1]
+            todo = [(i, u, exe, version, c) for i, u, c in samples if i not in done]
             print('%s/%s%s: %d of %d done, %d to run' % (
                 btype, station, ' (shard %d/%d)' % shard if shard else '',
                 len(samples) - len(todo), len(samples), len(todo)), flush=True)

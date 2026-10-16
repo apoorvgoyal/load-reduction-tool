@@ -15,7 +15,16 @@ FEATURES = [
     'oa_ls_m2', 'oa_after_sensible_hr', 'oa_after_latent_hr',
     'lpd_w_m2', 'epd_w_m2', 'people_per_m2', 't_cool_c', 't_heat_c', 'core_fraction',
     'orient_cos2', 'orient_sin2', 'aspect_ratio',
+    'occ_hours_frac', 'occ_peak_overlap', 'occ_overnight',
 ]
+
+PEAK_HOURS = range(12, 18)       # 12:00-18:00, when outdoor temperature and west sun peak
+NIGHT_HOURS = range(0, 6)
+
+
+def occupied_hours(sc):
+    s, n = int(sc['occ_start_h']), int(sc['occ_hours'])
+    return {(s + i) % 24 for i in range(n)}
 
 
 def geometry(sc):
@@ -40,6 +49,7 @@ def features(sc):
     core = max(0.0, width - 2 * d) * max(0.0, length - 2 * d) / a
     th = math.radians(sc['north_axis_deg'])
     aperture = sc['shgc'] * sc['wwr'] * ew
+    occ = occupied_hours(sc)
     return [
         ew, sc['wwr'] * ew,
         sc['wall_u'] * (1 - sc['wwr']) * ew,
@@ -53,6 +63,10 @@ def features(sc):
         sc['t_cool_c'], sc['t_heat_c'], core,
         math.cos(2 * th), math.sin(2 * th),   # a rectangle repeats every 180 degrees
         sc['aspect_ratio'],
+        # Schedule shape: lets one model cover buildings with different hours.
+        len(occ) / 24.0,
+        len(occ & set(PEAK_HOURS)) / float(len(PEAK_HOURS)),
+        len(occ & set(NIGHT_HOURS)) / float(len(NIGHT_HOURS)),
     ]
 
 
