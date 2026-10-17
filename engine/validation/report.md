@@ -1,6 +1,6 @@
 # Surrogate validation against EnergyPlus
 
-Generated 2026-10-16T18:57:45+00:00 by `engine/validate.py`. Each model is tested on EnergyPlus runs it was not trained on (independent Latin-hypercube sample, seed 9001, plus the building type default).
+Generated 2026-10-17T02:12:44+00:00 by `engine/validate.py`. Each model is tested on EnergyPlus runs it was not trained on (independent Latin-hypercube sample, seed 9001, plus the building type default).
 
 Pass rule: worst 95th-percentile absolute error across all design-day block totals <= 5.0%.
 
@@ -24,10 +24,10 @@ Pass rule: worst 95th-percentile absolute error across all design-day block tota
 | hotel|miami | 51 | 2.4% | clg_dp_2|total_w_m2 | 2.4% | 0.9% | PASS |
 | hotel|newyork | 51 | 3.0% | clg_db_2|total_w_m2 | 2.7% | 0.7% | PASS |
 | hotel|phoenix | 51 | 2.8% | clg_dp_0.4|total_w_m2 | 2.2% | 0.8% | PASS |
-| hotel|portangeles | 51 | 17.9% | clg_dp_2|total_w_m2 | 4.6% | 0.5% | **FAIL** |
+| hotel|portangeles | 51 | 10.6% | clg_dp_2|total_w_m2 | 3.3% | 0.3% | **FAIL** |
 | hotel|rochestermn | 51 | 4.8% | clg_dp_2|total_w_m2 | 3.4% | 0.7% | PASS |
 | hotel|sandiego | 51 | 3.3% | clg_dp_2|total_w_m2 | 2.1% | 1.2% | PASS |
-| hotel|sanfrancisco | 51 | 18.1% | clg_dp_2|total_w_m2 | 4.8% | 0.6% | **FAIL** |
+| hotel|sanfrancisco | 51 | 11.7% | clg_dp_2|total_w_m2 | 3.5% | 0.5% | **FAIL** |
 | hotel|seattle | 51 | 13.2% | clg_dp_2|total_w_m2 | 3.2% | 0.8% | **FAIL** |
 | hotel|stlouis | 51 | 2.3% | clg_dp_2|total_w_m2 | 2.1% | 0.5% | PASS |
 | hotel|tampa | 51 | 2.1% | clg_dp_2|total_w_m2 | 1.8% | 0.6% | PASS |
@@ -92,18 +92,18 @@ Pass rule: worst 95th-percentile absolute error across all design-day block tota
 | hotel|phoenix | clg_db_0.4|total_w_m2 | 57.3 | 56.2 | -1.9% |
 | hotel|phoenix | clg_dp_0.4|total_w_m2 | 56.1 | 55.0 | -2.1% |
 | hotel|phoenix | htg_99.6|total_w_m2 | 23.6 | 23.5 | -0.3% |
-| hotel|portangeles | clg_db_0.4|total_w_m2 | 42.6 | 42.1 | -1.2% |
-| hotel|portangeles | clg_dp_0.4|total_w_m2 | 38.0 | 37.1 | -2.3% |
-| hotel|portangeles | htg_99.6|total_w_m2 | 30.7 | 30.7 | -0.1% |
+| hotel|portangeles | clg_db_0.4|total_w_m2 | 42.6 | 42.0 | -1.4% |
+| hotel|portangeles | clg_dp_0.4|total_w_m2 | 38.0 | 37.6 | -1.0% |
+| hotel|portangeles | htg_99.6|total_w_m2 | 30.7 | 30.6 | -0.2% |
 | hotel|rochestermn | clg_db_0.4|total_w_m2 | 59.1 | 58.3 | -1.3% |
 | hotel|rochestermn | clg_dp_0.4|total_w_m2 | 62.6 | 62.1 | -0.9% |
 | hotel|rochestermn | htg_99.6|total_w_m2 | 54.6 | 54.7 | +0.1% |
 | hotel|sandiego | clg_db_0.4|total_w_m2 | 45.6 | 44.8 | -1.8% |
 | hotel|sandiego | clg_dp_0.4|total_w_m2 | 51.0 | 50.0 | -2.0% |
 | hotel|sandiego | htg_99.6|total_w_m2 | 18.7 | 18.5 | -0.8% |
-| hotel|sanfrancisco | clg_db_0.4|total_w_m2 | 38.1 | 37.6 | -1.2% |
-| hotel|sanfrancisco | clg_dp_0.4|total_w_m2 | 34.0 | 32.9 | -3.1% |
-| hotel|sanfrancisco | htg_99.6|total_w_m2 | 22.9 | 22.8 | -0.4% |
+| hotel|sanfrancisco | clg_db_0.4|total_w_m2 | 38.1 | 37.1 | -2.6% |
+| hotel|sanfrancisco | clg_dp_0.4|total_w_m2 | 34.0 | 32.8 | -3.5% |
+| hotel|sanfrancisco | htg_99.6|total_w_m2 | 22.9 | 22.8 | -0.5% |
 | hotel|seattle | clg_db_0.4|total_w_m2 | 46.8 | 45.8 | -2.1% |
 | hotel|seattle | clg_dp_0.4|total_w_m2 | 41.1 | 39.5 | -3.9% |
 | hotel|seattle | htg_99.6|total_w_m2 | 31.7 | 31.7 | -0.1% |
