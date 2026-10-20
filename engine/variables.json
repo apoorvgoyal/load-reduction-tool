@@ -112,7 +112,9 @@
     "slab_f_factor_w_mk",
     "thermal_mass",
     "setback_heat_c",
-    "setup_cool_c"
+    "setup_cool_c",
+    "oa_unoccupied_fraction",
+    "hvac_start_before_occ_h"
   ],
   "post_processed": [
     "cooling_sizing_factor",
@@ -178,7 +180,9 @@
       "slab_f_factor_w_mk",
       "thermal_mass",
       "setback_heat_c",
-      "setup_cool_c"
+      "setup_cool_c",
+      "oa_unoccupied_fraction",
+      "hvac_start_before_occ_h"
     ]
   }
 }

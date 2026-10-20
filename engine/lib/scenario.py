@@ -40,6 +40,8 @@ FIELDS = {
     'oa_per_person_ls':             {'unit': 'L/s-person', 'min': 0, 'max': 30},
     'oa_per_area_ls_m2':            {'unit': 'L/s-m2', 'min': 0, 'max': 10},
     'oa_ach':                       {'unit': '1/h', 'min': 0, 'max': 30},
+    'oa_unoccupied_fraction':       {'unit': '-', 'min': 0, 'max': 1},
+    'hvac_start_before_occ_h':      {'unit': 'h', 'min': 0, 'max': 12, 'int': True},
     'erv_sensible_eff':             {'unit': '-', 'min': 0, 'max': 0.95},
     'erv_latent_eff':               {'unit': '-', 'min': 0, 'max': 0.95},
     'infiltration_ach':             {'unit': '1/h', 'min': 0, 'max': 3},

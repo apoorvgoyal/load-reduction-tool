@@ -123,6 +123,29 @@ class ResultsTests(unittest.TestCase):
         self.assertAlmostEqual(h['sum_of_zone_peaks_w'], 7 + 12)
         self.assertEqual(r['eplus_version'], 'EnergyPlus, Version 25.2.0-test')
 
+    def test_peak_is_one_hour_average(self):
+        # Two timesteps per hour: a one-step spike must not become the peak.
+        model = dict(self.model, timesteps_per_hour=2)
+        sql = os.path.join(self.tmp, 'hourly.sql')
+        tot = results.V_CLG_TOT
+        make_sql(sql, {'X ANN CLG .4% CONDNS DB=>MWB': {
+            tot: {'G_S IDEAL LOADS': [10, 90, 20, 40, 40], 'M_S IDEAL LOADS': [0, 0, 0, 10, 10]},
+            results.V_CLG_LAT: {'G_S IDEAL LOADS': [1, 60, 2, 4, 6], 'M_S IDEAL LOADS': [0, 0, 0, 0, 0]},
+            results.V_OAT: {'Environment': [30, 31, 32, 33, 34]},
+        }}, None)
+        c = results.parse_sql(sql, model)['design_days']['clg_db_0.4']
+        # Scaled sums per step: 10, 90, 20, 70, 70 -> hourly windows ending at
+        # steps 2..5: 50, 55, 45, 70 -> peak 70 for the window ending at step 5.
+        self.assertAlmostEqual(c['block']['total_w'], 70)
+        self.assertEqual(c['block']['time'], '00:50')
+        self.assertAlmostEqual(c['block']['latent_w'], 5)          # same window as the total
+        self.assertAlmostEqual(c['block']['outdoor_db_c'], 33.5)
+        self.assertAlmostEqual(c['block']['max_timestep_w'], 90)    # the spike, kept for information
+        self.assertEqual(c['block']['max_timestep_time'], '00:20')
+        # Zone peaks are one-hour maxima too: G_S max(50, 55, 30, 40) = 55; M_S 10 * 3
+        self.assertAlmostEqual(c['sum_of_zone_peaks_w'], 55 + 30)
+        self.assertEqual(c['hourly_means_w'], [50, 45, 70])
+
     def test_components_scaled_and_grand_total_dropped(self):
         r = results.parse_sql(self.sql, self.model)
         self.assertAlmostEqual(r['components']['cooling']['People']['Total'], 100 + 30)

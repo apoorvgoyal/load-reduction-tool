@@ -24,6 +24,40 @@ except ImportError:
 NODE = shutil.which('node')
 
 
+class GoverningRuleTests(unittest.TestCase):
+    """The pass rule on the reported peaks, with a stub model (no numpy needed)."""
+    def _errors(self, cases):
+        import validate
+        recs = [{'scenario': {'i': i}, 'targets': t} for i, (t, _) in enumerate(cases)]
+        preds = {i: p for i, (_, p) in enumerate(cases)}
+        orig = validate.surrogate.predict
+        validate.surrogate.predict = lambda model, sc: (preds[sc['i']], [])
+        try:
+            return validate.governing_errors(None, recs)
+        finally:
+            validate.surrogate.predict = orig
+
+    def test_negligible_heating_judged_against_design_load(self):
+        # Heating 0.5 W/m2 against 200 W/m2 of cooling: a 2 W/m2 miss is 2/(0.1*200) = 10%,
+        # not 400%.
+        t = {'clg_db_0.4|total_w_m2': 150.0, 'clg_dp_0.4|total_w_m2': 200.0, 'htg_99.6|total_w_m2': 0.5}
+        p = dict(t, **{'htg_99.6|total_w_m2': 2.5})
+        g = self._errors([(t, p)])
+        self.assertAlmostEqual(g['heating 99.6%']['p95_abs_pct'], 10.0)
+        self.assertEqual(g['heating 99.6%']['n_negligible'], 1)
+        # Cooling governs on the larger day for both EnergyPlus and the model: exact here.
+        self.assertAlmostEqual(g['cooling 0.4%']['p95_abs_pct'], 0.0)
+
+    def test_material_peak_judged_on_itself(self):
+        t = {'clg_db_0.4|total_w_m2': 100.0, 'clg_dp_0.4|total_w_m2': 80.0, 'htg_99.6|total_w_m2': 60.0}
+        p = dict(t, **{'htg_99.6|total_w_m2': 63.0, 'clg_dp_0.4|total_w_m2': 110.0})
+        g = self._errors([(t, p)])
+        self.assertAlmostEqual(g['heating 99.6%']['p95_abs_pct'], 5.0)
+        # The model wrongly lets the dew-point day govern: 110 vs 100 -> 10%.
+        self.assertAlmostEqual(g['cooling 0.4%']['p95_abs_pct'], 10.0)
+        self.assertEqual(g['heating 99.6%']['n_negligible'], 0)
+
+
 @unittest.skipUnless(HAVE_NP, 'numpy not installed')
 class ValidateEndToEnd(unittest.TestCase):
     @classmethod

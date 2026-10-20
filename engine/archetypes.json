@@ -66,6 +66,18 @@
       "unit": "-",
       "source": "No safety factor applied by default (see cooling_sizing_factor)",
       "verify": false
+    },
+    "oa_unoccupied_fraction": {
+      "value": 0.0,
+      "unit": "fraction of design outdoor air",
+      "source": "ASHRAE 62.1 ventilation rates apply while spaces are occupied; outdoor air is off when unoccupied (no unoccupied ventilation modelled). Set above 0 for buildings ventilated around the clock",
+      "verify": true
+    },
+    "hvac_start_before_occ_h": {
+      "value": 0,
+      "unit": "h",
+      "source": "No standard value: start-up lead time is an operating choice (optimal start, pre-event pre-cooling). 0 = systems and ventilation start when people arrive; set to the building's start-up sequence",
+      "verify": true
     }
   },
   "envelope_by_climate_zone": {
@@ -461,6 +473,11 @@
       "oa_ach": {
         "value": 6.0,
         "source": "Common occupied-laboratory design minimum (6 air changes per hour of outdoor air); a design choice, not a code requirement - set per lab program and hood count",
+        "verify": true
+      },
+      "oa_unoccupied_fraction": {
+        "value": 1.0,
+        "source": "Laboratory ventilation runs continuously (exhaust, fume hoods and room pressurization); see ANSI/AIHA Z9.5 Laboratory Ventilation. Set below 1.0 only for an approved unoccupied setback",
         "verify": true
       },
       "m2_per_person": {

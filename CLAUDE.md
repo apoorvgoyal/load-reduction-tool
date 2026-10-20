@@ -54,6 +54,7 @@ python3 -m unittest discover -s engine/tests -t engine
   - Results are always tagged by source, EnergyPlus run or surrogate, and the surrogate's out-of-fold error is shown with it.
   - Don't show surrogate output when a fixed input has changed (`fixed_inputs` in `variables.json`).
   - Sizing factors stay explicit and default to 1.0.
+- **Peaks are one-hour averages** (`engine/lib/results.py`, window = `TIMESTEPS_PER_HOUR` in `engine/lib/idf.py`). Single-timestep maxima are start-up transients whose size depends on the timestep; they are reported as `max_timestep_w`, never as the peak. Training records also keep clock-hour profiles (`hourly_w_m2`) so a change of peak definition needs a refit, not new runs.
 - **Middle-floor scaling** is done in `engine/lib/results.py` with the model's per-zone `scale`, not with EnergyPlus zone multipliers. Keep it that way so the scaling stays auditable.
 - **Status:** heating peaks are validated against hand calcs on real EnergyPlus 25.2 runs; cooling peaks are not yet checked against an independent reference (README Status section). Treat results as validation-stage, not production.
 - **Training vs test data:** `batch.py` trains with seed 1; `validate.py` tests with seed 9001 and stores runs in `engine/runs/test/`. Never fit on test runs or validate with the training seed.

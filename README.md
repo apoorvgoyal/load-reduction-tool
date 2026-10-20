@@ -106,13 +106,15 @@ The office-only model passed the same test at 3.4%. Details: `docs/experiments/2
 ```bash
 python3 engine/validate.py                    # every trained model; 50 test cases each + the type default
 python3 engine/validate.py --skip-run         # re-score existing test runs (e.g. after a refit), no EnergyPlus needed
-python3 engine/validate.py --threshold 5      # pass limit: worst P95 % across all design-day block totals
+python3 engine/validate.py --threshold 5      # pass limit: worst P95 % on the peaks the page reports
 ```
 
 What `validate.py` does for each trained model:
 1. Draws an independent test set: a Latin-hypercube sample with seed 9001, separate from the training seed, plus the building type's default scenario.
 2. Runs any missing cases in EnergyPlus. These go in `engine/runs/test/`, which is never used for training.
 3. Predicts every case exactly as the page does, and compares it with EnergyPlus.
+
+**Pass rule.** For each of the five peaks the page reports (governing cooling at 0.4/1/2%, the larger of the dry-bulb and dew-point days as EnergyPlus and the model each see it; heating at 99.6/99%), take the absolute error of each test case and its 95th percentile across the cases. The model passes if the worst of the five is at or below the threshold (default 5%, a project choice rather than a standard). A peak below 10% of that case's design load (for example heating in Honolulu) is judged as a share of that 10% rather than of itself, so a fraction of a W/m² can't produce a meaningless percentage. Every individual design day is also scored, for information.
 
 It then:
 - writes `engine/validation/report.md` and `report.json`;
@@ -140,13 +142,14 @@ Then open `diag1\eplusout.err` and look for the `** Severe  **` lines.
 - **Envelope.** Assembly U-factors are converted to a massless layer after removing ASHRAE Fundamentals Ch. 26 air-film resistances. Glazing uses U, SHGC. Slab-on-grade uses the ASHRAE 90.1 F-factor method with the station's 0.5 m monthly ground temperatures from the `.stat` file. Floor/ceiling slabs carry concrete mass when enabled.
 - **Partitions.** Interior partitions and inter-floor slabs are adiabatic: adjacent conditioned space at the same temperature, as in a standard peak-load calculation.
 - **Internal gains.** People (area per person, metabolic rate), lighting and equipment (W/m²) at full value during occupied hours on the cooling design day. **Zero internal gains on the heating design day** (standard conservative practice).
-- **Ventilation.** Outdoor air per ASHRAE 62.1 (Rp × people + Ra × area) during occupied hours, on both design days. Optional sensible or enthalpy heat recovery.
+- **Ventilation.** Outdoor air per ASHRAE 62.1 (Rp × people + Ra × area), or by air changes, during occupied hours on both design days. Outside occupied hours it runs at `oa_unoccupied_fraction` of the design rate: 0 by default, 1 (continuous) for laboratories. Optional sensible or enthalpy heat recovery.
+- **Start-up.** `hvac_start_before_occ_h` starts ventilation and occupied setpoints that many hours before people arrive (optimal start, pre-event pre-cooling). The default is 0: there is no standard value, so set it to the building's sequence. Starting earlier dries and conditions the space before occupancy, which removes the start-up pull-down from the occupied peak.
 - **HVAC.** `ZoneHVAC:IdealLoadsAirSystem` per zone, with supply-air temperatures from the inputs and dehumidification to a constant supply humidity ratio. Reported loads are therefore **coil loads including outdoor air**, split into sensible and latent.
 - **Design days.** Taken verbatim from the station's `.ddy` file: heating 99.6% and 99%; cooling 0.4/1/2% dry-bulb with mean coincident wet-bulb; dehumidification 0.4/1/2% dew point with mean coincident dry-bulb. **Cooling is governed by whichever of the dry-bulb and dew-point days gives the larger total.**
 - **Outputs.**
-  - Block (coincident) peak and sum of zone peaks.
+  - Block (coincident) peak and sum of zone peaks. **Peaks are one-hour averages** (a sliding one-hour window over the 10-minute timesteps), as hourly design-day load methods report them. The highest single 10-minute value is shown alongside. Where it is well above the hourly peak, it is a start-up transient (for example moisture stored overnight being removed in the first timestep after the ventilation starts). Its size depends on the timestep length, so it is not used as the peak. Cover it by starting earlier or with deliberate extra capacity.
   - Sensible and latent loads, the ventilation (outdoor-air) load before heat recovery and the amount recovered, and supply airflow at peak. The coil totals already include the recovery credit.
-  - Peak time and the 24-hour profile.
+  - Peak hour (time = end of the hour) and the 24-hour profile at 10-minute resolution.
   - EnergyPlus's zone component load summary and zone sizing table.
   - The IDF, for anyone who wants to inspect or rerun it.
 - **Sizing factors.** Default 1.0 and applied visibly. Results always show whether a factor is included.

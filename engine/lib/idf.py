@@ -160,6 +160,9 @@ def _verts_fields(verts):
     return f
 
 
+TIMESTEPS_PER_HOUR = 6   # results.py averages peaks over one hour of these
+
+
 # ── Schedules ───────────────────────────────────────────────────────────────
 
 def hourly_profile(start, hours, on, off):
@@ -223,7 +226,7 @@ def build(sc, ddy, stat, eplus_version='25.2'):
         ('Solar Distribution', 'FullInteriorAndExterior'),
         ('Maximum Number of Warmup Days', 50),
         ('Minimum Number of Warmup Days', 6)])
-    w.add('Timestep', [('Number of Timesteps per Hour', 6)])
+    w.add('Timestep', [('Number of Timesteps per Hour', TIMESTEPS_PER_HOUR)])
     w.add('GlobalGeometryRules', [
         ('Starting Vertex Position', 'UpperLeftCorner'),
         ('Vertex Entry Direction', 'Counterclockwise'),
@@ -282,7 +285,15 @@ def build(sc, ddy, stat, eplus_version='25.2'):
     # Heating design day carries no internal gains (standard conservative practice).
     compact_schedule(w, 'OCC_SCH', 'Fraction', occ, zero, occ)
     compact_schedule(w, 'GAINS_SCH', 'Fraction', gains, zero, gains)
-    compact_schedule(w, 'OA_SCH', 'Fraction', occ, occ, occ)
+    # Systems start hvac_start_before_occ_h ahead of occupancy: ventilation at
+    # the design rate and occupied setpoints from then on, so the space is
+    # conditioned (and dried) before people arrive. Outside that window outdoor
+    # air runs at oa_unoccupied_fraction of the design rate (1.0 = continuous,
+    # e.g. laboratories).
+    pre = int(sc.get('hvac_start_before_occ_h', 0))
+    s_on, h_on = s0 - pre, min(24, nh + pre)
+    oa = hourly_profile(s_on, h_on, 1.0, float(sc.get('oa_unoccupied_fraction', 0.0)))
+    compact_schedule(w, 'OA_SCH', 'Fraction', oa, oa, oa)
     compact_schedule(w, 'ALWAYS_ON', 'Fraction', one, one, one)
     act = [float(sc['activity_w_per_person'])] * 24
     compact_schedule(w, 'ACTIVITY_SCH', 'Any Number', act, act, act)
@@ -291,8 +302,8 @@ def build(sc, ddy, stat, eplus_version='25.2'):
     th, tc = sc['t_heat_c'], sc['t_cool_c']
     sb = sc['setback_heat_c'] if sc.get('setback_heat_c') is not None else th
     su = sc['setup_cool_c'] if sc.get('setup_cool_c') is not None else tc
-    htg = hourly_profile(s0, nh, th, sb)
-    clg = hourly_profile(s0, nh, tc, su)
+    htg = hourly_profile(s_on, h_on, th, sb)
+    clg = hourly_profile(s_on, h_on, tc, su)
     compact_schedule(w, 'HTG_SP', 'Temperature', htg, htg, htg)
     compact_schedule(w, 'CLG_SP', 'Temperature', clg, clg, clg)
     w.add('ThermostatSetpoint:DualSetpoint', [('Name', 'DualSP'),
@@ -524,6 +535,7 @@ def build(sc, ddy, stat, eplus_version='25.2'):
         'totals': totals,
         'wwr_modelled': totals['window_m2'] / totals['ext_wall_m2'] if totals['ext_wall_m2'] else 0.0,
         'design_day_env_names': env_names,
+        'timesteps_per_hour': TIMESTEPS_PER_HOUR,
         'eplus_version_target': eplus_version,
     }
     return w.text(), model

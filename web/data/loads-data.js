@@ -2070,6 +2070,18 @@ var LOADS_DATA = {
     "unit": "-",
     "source": "No safety factor applied by default (see cooling_sizing_factor)",
     "verify": false
+   },
+   "oa_unoccupied_fraction": {
+    "value": 0.0,
+    "unit": "fraction of design outdoor air",
+    "source": "ASHRAE 62.1 ventilation rates apply while spaces are occupied; outdoor air is off when unoccupied (no unoccupied ventilation modelled). Set above 0 for buildings ventilated around the clock",
+    "verify": true
+   },
+   "hvac_start_before_occ_h": {
+    "value": 0,
+    "unit": "h",
+    "source": "No standard value: start-up lead time is an operating choice (optimal start, pre-event pre-cooling). 0 = systems and ventilation start when people arrive; set to the building's start-up sequence",
+    "verify": true
    }
   },
   "envelope_by_climate_zone": {
@@ -2467,6 +2479,11 @@ var LOADS_DATA = {
      "source": "Common occupied-laboratory design minimum (6 air changes per hour of outdoor air); a design choice, not a code requirement - set per lab program and hood count",
      "verify": true
     },
+    "oa_unoccupied_fraction": {
+     "value": 1.0,
+     "source": "Laboratory ventilation runs continuously (exhaust, fume hoods and room pressurization); see ANSI/AIHA Z9.5 Laboratory Ventilation. Set below 1.0 only for an approved unoccupied setback",
+     "verify": true
+    },
     "m2_per_person": {
      "value": 15.0,
      "source": "Carried over from the Total Carbon Tool energy module (js/energy-model.js) EM_DEFAULTS.lab.occ_dens",
@@ -2781,12 +2798,79 @@ var LOADS_DATA = {
    "slab_f_factor_w_mk",
    "thermal_mass",
    "setback_heat_c",
-   "setup_cool_c"
+   "setup_cool_c",
+   "oa_unoccupied_fraction",
+   "hvac_start_before_occ_h"
   ],
   "post_processed": [
    "cooling_sizing_factor",
    "heating_sizing_factor"
-  ]
+  ],
+  "unified": {
+   "_readme": "One shared design space for all building types (model key 'unified|<station>'). A share of samples is drawn around each building type's preset exactly as for a per-type model; the rest are spread across the combined range of every type, with schedules varied too, so in-between buildings are covered.",
+   "preset_share": 0.7,
+   "wide": {
+    "m2_per_person": {
+     "log_min": 0.31,
+     "log_max": 80.0
+    },
+    "lpd_w_m2": {
+     "min": 2.5,
+     "max": 22.0
+    },
+    "epd_w_m2": {
+     "log_min": 2.0,
+     "log_max": 100.0
+    },
+    "oa_per_person_ls": {
+     "min": 0.0,
+     "max": 20.0
+    },
+    "oa_per_area_ls_m2": {
+     "min": 0.0,
+     "max": 1.8
+    },
+    "oa_ach": {
+     "min": 0.0,
+     "max": 12.0,
+     "zero_share": 0.5,
+     "_note": "half the wide samples use no air-change outdoor air"
+    },
+    "t_cool_c": {
+     "min": 20.0,
+     "max": 28.0
+    },
+    "t_heat_c": {
+     "min": 15.0,
+     "max": 23.0,
+     "_note": "capped at 1 C below the sampled cooling setpoint"
+    },
+    "occ_start_h": {
+     "min": 0,
+     "max": 23,
+     "int": true
+    },
+    "occ_hours": {
+     "min": 4,
+     "max": 24,
+     "int": true
+    }
+   },
+   "fixed_inputs": [
+    "floor_to_floor_m",
+    "perimeter_depth_m",
+    "activity_w_per_person",
+    "unoccupied_internal_fraction",
+    "cooling_supply_air_c",
+    "heating_supply_air_c",
+    "slab_f_factor_w_mk",
+    "thermal_mass",
+    "setback_heat_c",
+    "setup_cool_c",
+    "oa_unoccupied_fraction",
+    "hvac_start_before_occ_h"
+   ]
+  }
  },
  "fields": {
   "type": {
@@ -2932,6 +3016,17 @@ var LOADS_DATA = {
    "unit": "1/h",
    "min": 0,
    "max": 30
+  },
+  "oa_unoccupied_fraction": {
+   "unit": "-",
+   "min": 0,
+   "max": 1
+  },
+  "hvac_start_before_occ_h": {
+   "unit": "h",
+   "min": 0,
+   "max": 12,
+   "int": true
   },
   "erv_sensible_eff": {
    "unit": "-",

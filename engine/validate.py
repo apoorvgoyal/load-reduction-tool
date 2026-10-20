@@ -20,6 +20,8 @@ The default threshold is 5%: the worst 95th-percentile absolute error on the
 peaks the page reports must not exceed it - the governing cooling peak for each
 percentile (larger of the dry-bulb and dew-point days) and the heating peak for
 each percentile. Every individual design day is also scored, for information.
+A peak below 10% of the case's design load (heating in a hot climate, say) is
+judged as a share of that 10% rather than of itself (NEGLIGIBLE_FRACTION).
 """
 import argparse
 import datetime
@@ -135,26 +137,44 @@ GOVERNING = {
 }
 
 
+# A peak far smaller than the building's design load (heating in Honolulu,
+# a fraction of a W/m2 against ~270 W/m2 of cooling) makes a percentage error
+# meaningless. Errors are therefore taken relative to the larger of the peak
+# itself and NEGLIGIBLE_FRACTION of the case's design load (the larger of its
+# 0.4% governing cooling and 99.6% heating peaks, from EnergyPlus). A peak
+# above that share is judged on its own value, exactly as before.
+NEGLIGIBLE_FRACTION = 0.10
+
+
+def _design_load(targets):
+    vals = [targets.get(k) for k in ('clg_db_0.4|total_w_m2', 'clg_dp_0.4|total_w_m2', 'htg_99.6|total_w_m2')]
+    return max([v for v in vals if v is not None] or [0.0])
+
+
 def governing_errors(model, recs):
     """Error on the peak the page shows: the larger of the dry-bulb and dew-point
     cooling days (as EnergyPlus and the model each see it), and the heating day.
     A wrong prediction that flips which cooling day governs is caught here,
-    because the model's own maximum is compared with EnergyPlus's maximum."""
-    out = {}
-    for label, days in GOVERNING.items():
-        pct = []
-        for r in recs:
-            pred, _ = surrogate.predict(model, r['scenario'])
+    because the model's own maximum is compared with EnergyPlus's maximum.
+    Negligible peaks are judged against NEGLIGIBLE_FRACTION of the design load."""
+    out = {label: [] for label in GOVERNING}
+    floored = {label: 0 for label in GOVERNING}
+    for r in recs:
+        pred, _ = surrogate.predict(model, r['scenario'])
+        ref = NEGLIGIBLE_FRACTION * _design_load(r['targets'])
+        for label, days in GOVERNING.items():
             keys = [d + '|total_w_m2' for d in days]
             if not all(k in r['targets'] and k in pred for k in keys):
                 continue
             y = max(r['targets'][k] for k in keys)
             p = max(pred[k] for k in keys)
-            if y > 1e-9:
-                pct.append(abs(p - y) / y * 100)
-        out[label] = {'n': len(pct), 'p50_abs_pct': _pct(pct, 50), 'p95_abs_pct': _pct(pct, 95),
-                      'max_abs_pct': max(pct) if pct else None}
-    return out
+            denom = max(y, ref)
+            if denom > 1e-9:
+                out[label].append(abs(p - y) / denom * 100)
+                floored[label] += y < ref
+    return {label: {'n': len(pct), 'p50_abs_pct': _pct(pct, 50), 'p95_abs_pct': _pct(pct, 95),
+                    'max_abs_pct': max(pct) if pct else None, 'n_negligible': floored[label]}
+            for label, pct in out.items()}
 
 
 def default_case_row(model, recs):
@@ -183,7 +203,9 @@ def write_report(results, path_md, path_json):
              'the governing cooling peak for each percentile (the larger of the dry-bulb and dew-point days, as EnergyPlus '
              'and the model each see it) and the heating peak for each percentile. "Any single day" judges every design '
              'day on its own value, including mild days that never govern and can sit near zero; it is shown for '
-             'information.' % results['threshold_pct'], '',
+             'information. Peaks are one-hour averages. A peak below %d%% of the case\'s design load (larger of '
+             '0.4%% cooling and 99.6%% heating) is judged as a share of that %d%%, not of itself.' % (
+                 results['threshold_pct'], NEGLIGIBLE_FRACTION * 100, NEGLIGIBLE_FRACTION * 100), '',
              '| Model | Test runs | Worst P95, reported peaks | Which peak | Cooling 0.4% | Heating 99.6% | Any single day (info) | Result |',
              '|---|---|---|---|---|---|---|---|']
 

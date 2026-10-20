@@ -26,7 +26,12 @@ class PipelineTests(unittest.TestCase):
             ['htg_99.6', 'htg_99', 'clg_db_0.4', 'clg_db_1', 'clg_db_2', 'clg_dp_0.4', 'clg_dp_1', 'clg_dp_2']))
         # 15 zones; middle floor scaled by 3 -> 5 + 5*3 + 5 = 25 zone-equivalents
         nwin = out['idf'].count('FenestrationSurface:Detailed,')
-        self.assertAlmostEqual(out['design_days']['clg_db_0.4']['block']['total_w'], 25 * (200.0 + nwin))
+        # Peaks are one-hour averages; the fake day is shorter than an hour, so the
+        # peak is the mean of its three placeholder steps. The highest single step
+        # is kept as max_timestep_w.
+        block = out['design_days']['clg_db_0.4']['block']
+        self.assertAlmostEqual(block['total_w'], 25 * ((100.0 + nwin) + (200.0 + nwin) + 150.0) / 3)
+        self.assertAlmostEqual(block['max_timestep_w'], 25 * (200.0 + nwin))
         self.assertEqual(out['messages']['warnings'], 1)
         self.assertEqual(out['provenance']['gfa_m2'], 'user')
 

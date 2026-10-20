@@ -4,8 +4,15 @@ results structure.
 Scaling: the middle floor stands in for (N - 2) floors. Every zone result is
 multiplied by its floor's `scale` from the model info before summing.
 
-Block (coincident) peak = max over timesteps of the scaled sum across zones.
-Sum of zone peaks       = scaled sum of each zone's own maximum.
+Peaks are one-hour averages: every series is averaged over a sliding window
+of one hour of timesteps (model['timesteps_per_hour']), as hourly design-day
+load methods report them. A single-timestep value can be a start-up transient
+(for example stored moisture removed in the first 10 minutes after the
+ventilation starts) whose size depends on the timestep length; it is kept for
+information as `block['max_timestep_w']`, not used as the peak.
+
+Block (coincident) peak = max over one-hour windows of the scaled sum across zones.
+Sum of zone peaks       = scaled sum of each zone's own one-hour maximum.
 """
 import sqlite3
 
@@ -71,8 +78,8 @@ def _parse(con, model):
         var_of[idx] = (name, (key or '').upper())
 
     # series[env][var][time_index] = scaled building sum
-    # zmax[env][var][zone] = max of unscaled zone value
-    series, zmax, oat = {}, {}, {}
+    # zser[env][var][zone][time_index] = unscaled zone value
+    series, zser, oat = {}, {}, {}
     q = 'SELECT TimeIndex, ReportDataDictionaryIndex, Value FROM ReportData'
     for ti, di, val in con.execute(q):
         if ti not in times or di not in var_of:
@@ -88,10 +95,9 @@ def _parse(con, model):
         s = scale[zone]
         series.setdefault(env, {}).setdefault(name, {})
         series[env][name][ti] = series[env][name].get(ti, 0.0) + val * s
-        zm = zmax.setdefault(env, {}).setdefault(name, {})
-        if val > zm.get(zone, float('-inf')):
-            zm[zone] = val
+        zser.setdefault(env, {}).setdefault(name, {}).setdefault(zone, {})[ti] = val
 
+    n = max(1, int(model.get('timesteps_per_hour', 1)))
     design_days = {}
     for env in sorted(set(times[t][0] for t in times)):
         is_htg = env.startswith('htg')
@@ -99,10 +105,19 @@ def _parse(con, model):
         ser = series.get(env, {})
         if main not in ser or not ser[main]:
             continue
-        ti_peak = max(ser[main], key=lambda t: (ser[main][t], -t))
-        at = lambda v: ser.get(v, {}).get(ti_peak)
+        steps = sorted(ser[main])
+        avg_main = hourly(ser[main], steps, n)
+        ti_peak = max(avg_main, key=lambda t: (avg_main[t], -t))
+        window = steps[steps.index(ti_peak) - n + 1:steps.index(ti_peak) + 1]
+
+        def at(v, src=ser):
+            vals = src.get(v)
+            if not vals or any(t not in vals for t in window):
+                return None
+            return sum(vals[t] for t in window) / len(window)
+        ti_inst = max(steps, key=lambda t: (ser[main][t], -t))
         block = {
-            'total_w': ser[main][ti_peak],
+            'total_w': avg_main[ti_peak],
             'sensible_w': at(V_HTG_SEN if is_htg else V_CLG_SEN),
             'latent_w': None if is_htg else at(V_CLG_LAT),
             'zone_sensible_w': at(V_ZN_HTG if is_htg else V_ZN_CLG),
@@ -110,18 +125,28 @@ def _parse(con, model):
             'heat_recovery_w': at(V_HR_HTG if is_htg else V_HR_CLG),
             'supply_air_m3s': at(V_SA_FLOW),
             'outdoor_air_m3s': at(V_OA_FLOW),
-            'time': times[ti_peak][1],
-            'outdoor_db_c': oat.get(env, {}).get(ti_peak),
+            'time': times[ti_peak][1],            # end of the peak hour
+            'averaging_minutes': 60 if n > 1 else None,
+            'outdoor_db_c': at('oat', {'oat': oat.get(env, {})}),
+            # Highest single-timestep value (start-up / pull-down transients), for information.
+            'max_timestep_w': ser[main][ti_inst],
+            'max_timestep_time': times[ti_inst][1],
         }
-        sop = sum(v * scale[z] for z, v in zmax.get(env, {}).get(main, {}).items())
-        # Hourly profile of the block total (for charts): keep every timestep.
-        profile = [[times[t][1], ser[main][t]] for t in sorted(ser[main])]
+        sop = sum(max(hourly(vals, sorted(vals), n).values()) * scale[z]
+                  for z, vals in zser.get(env, {}).get(main, {}).items())
+        # Profile of the block total (for charts): keep every timestep.
+        profile = [[times[t][1], ser[main][t]] for t in steps]
+        # Clock-hour means of the block total, saved with training runs so a
+        # change to the peak definition needs a refit, not new EnergyPlus runs.
+        hourly_means = [sum(ser[main][t] for t in steps[i:i + n]) / len(steps[i:i + n])
+                        for i in range(0, len(steps), n)]
         design_days[env] = {
             'key': env,
             'kind': 'heating' if is_htg else 'cooling',
             'block': block,
             'sum_of_zone_peaks_w': sop,
             'profile': profile,
+            'hourly_means_w': hourly_means,
         }
 
     return {
@@ -130,6 +155,15 @@ def _parse(con, model):
         'zone_sizing': _zone_sizes(con, scale),
         'components': _components(con, scale),
     }
+
+
+def hourly(vals, steps, n):
+    """Mean over each window of n consecutive timesteps, keyed by the window's
+    last timestep. Windows shorter than n (start of the day) are skipped unless
+    the day has fewer than n steps."""
+    if len(steps) < n:
+        return {steps[-1]: sum(vals[t] for t in steps) / len(steps)}
+    return {steps[i]: sum(vals[t] for t in steps[i - n + 1:i + 1]) / n for i in range(n - 1, len(steps))}
 
 
 def _eplus_version(con):

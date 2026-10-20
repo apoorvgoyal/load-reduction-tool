@@ -68,11 +68,13 @@
       ['epd_w_m2', 'Equipment power density', 'W/m2', 0.5],
       ['occ_start_h', 'Occupied from (hour)', 'h', 1],
       ['occ_hours', 'Occupied hours per day', 'h', 1],
+      ['hvac_start_before_occ_h', 'Systems & ventilation start before occupancy', 'h', 1],
       ['unoccupied_internal_fraction', 'Lights/equipment when unoccupied', '-', 0.05]]},
     {title: 'Ventilation & infiltration', open: true, fields: [
       ['oa_per_person_ls', 'Outdoor air per person (Rp)', 'L/s-person', 0.1],
       ['oa_per_area_ls_m2', 'Outdoor air per area (Ra)', 'L/s-m2', 0.01],
       ['oa_ach', 'Outdoor air by air changes (labs, ASHRAE 170)', '1/h', 0.5],
+      ['oa_unoccupied_fraction', 'Outdoor air when unoccupied (fraction of design)', '-', 0.05],
       ['erv_sensible_eff', 'Heat recovery sensible effectiveness', '-', 0.05],
       ['erv_latent_eff', 'Heat recovery latent effectiveness', '-', 0.05],
       ['infiltration_ach', 'Infiltration (whole building)', '1/h', 0.01]]},
@@ -217,7 +219,9 @@
       supply: c && c.supply_air_m3s, time: c && c.time, oat: c && c.outdoor_db_c, errC: c && c.err_pct,
       htg: h && h.total_w * hf, htgRaw: h && h.total_w,
       htgSop: h && h.sum_of_zone_peaks_w != null ? h.sum_of_zone_peaks_w * hf : null,
-      hTime: h && h.time, errH: h && h.err_pct, cf: cf, hf: hf
+      hTime: h && h.time, errH: h && h.err_pct, cf: cf, hf: hf,
+      clgTs: c && c.max_timestep_w, clgTsTime: c && c.max_timestep_time,
+      htgTs: h && h.max_timestep_w, htgTsTime: h && h.max_timestep_time
     };
   }
 
@@ -538,7 +542,7 @@
     }
     return '<div class="chart"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(label) + '">' +
       '<line x1="' + P + '" y1="' + (H - 22) + '" x2="' + (W - 10) + '" y2="' + (H - 22) + '" stroke="currentColor" stroke-opacity=".2"/>' +
-      '<text x="' + P + '" y="12">' + esc(label) + ' · peak ' + fmt(mx / 1000, 0) + ' kW</text>' +
+      '<text x="' + P + '" y="12">' + esc(label) + ' · 10-minute values, highest ' + fmt(mx / 1000, 0) + ' kW</text>' +
       '<polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="2"/>' + ticks + '</svg></div>';
   }
 
@@ -550,9 +554,13 @@
       '<button class="btn" type="button" id="b-dl-json">Download results JSON</button></div></div>';
     var msgs = run.messages || {};
     if (msgs.severe) h += '<div class="note bad">' + msgs.severe + ' severe EnergyPlus message(s). Review before using: ' + esc((msgs.severe_messages || []).slice(0, 3).join(' | ')) + '</div>';
-    h += '<p class="sub">Governing cooling day: <b>' + esc(DD_LABEL[g.cKey] || g.cKey) + '</b>, peak at ' + esc(g.time || '–') +
+    h += '<p class="sub">Governing cooling day: <b>' + esc(DD_LABEL[g.cKey] || g.cKey) + '</b>, peak hour ending ' + esc(g.time || '–') +
       ' (outdoor ' + fmt(g.oat, 1) + ' °C). Governing heating day: <b>' + esc(DD_LABEL[g.hKey] || g.hKey) + '</b>. ' +
       (msgs.warnings || 0) + ' EnergyPlus warnings.</p>';
+    h += '<p class="sub">Peaks are one-hour averages, as hourly design-day load methods report them. Highest single 10-minute value: cooling ' +
+      fmt((g.clgTs || 0) / 1000, 0) + ' kW at ' + esc(g.clgTsTime || '–') + ', heating ' + fmt((g.htgTs || 0) / 1000, 0) + ' kW at ' +
+      esc(g.htgTsTime || '–') + '. Where these are well above the hourly peak, they are start-up (pull-down) transients: cover them by starting ' +
+      'systems earlier (input above) or with extra capacity, as a deliberate choice.</p>';
     var c = result.dd[g.cKey], hh = result.dd[g.hKey];
     h += profileSvg(c && c.profile, 'var(--cool)', 'Block cooling, ' + (DD_LABEL[g.cKey] || ''));
     h += profileSvg(hh && hh.profile, 'var(--heat)', 'Block heating, ' + (DD_LABEL[g.hKey] || ''));

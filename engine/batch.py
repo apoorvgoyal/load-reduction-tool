@@ -150,7 +150,14 @@ def _work(args):
            'targets': features.targets(r['design_days'], sc['gfa_m2']),
            'eplus': r['engine']['version'], 'warnings': r['messages']['warnings'],
            'severe': r['messages']['severe'],
-           'severe_messages': r['messages'].get('severe_messages', [])[:5]}
+           'severe_messages': r['messages'].get('severe_messages', [])[:5],
+           # Clock-hour block totals (W/m2) per design day, plus the highest
+           # single-timestep value: enough to re-derive peaks under another
+           # definition without new EnergyPlus runs.
+           'hourly_w_m2': {k: [round(v / sc['gfa_m2'], 2) for v in dd.get('hourly_means_w', [])]
+                           for k, dd in r['design_days'].items()},
+           'max_timestep_w_m2': {k: round(dd['block']['max_timestep_w'] / sc['gfa_m2'], 2)
+                                 for k, dd in r['design_days'].items() if dd['block'].get('max_timestep_w') is not None}}
     if component:
         rec['component'] = component
     return i, user, rec, None

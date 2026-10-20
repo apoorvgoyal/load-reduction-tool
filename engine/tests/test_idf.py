@@ -9,6 +9,7 @@ strict validity check.
 """
 import math
 import os
+import re
 import sys
 import unittest
 
@@ -25,6 +26,10 @@ try:
     HAVE_OS = True
 except ImportError:
     HAVE_OS = False
+
+
+def _fmt_num(v):
+    return idf._fmt(float(v))
 
 
 def _build(**over):
@@ -80,6 +85,33 @@ class GeometryTests(unittest.TestCase):
         wrap = idf.hourly_profile(20, 8, 1.0, 0.0)
         self.assertEqual(sum(wrap), 8)
         self.assertEqual(idf.compact_day([1.0] * 24), ['Until: 24:00', '1'])
+
+    def _schedule(self, text, name):
+        block = text[re.search(r'Schedule:Compact,\n\s+%s,' % name, text).start():]
+        block = block[:block.index(';') + 1]
+        return [ln.split('!')[0].strip().rstrip(',;') for ln in block.splitlines()[4:]]
+
+    def test_outdoor_air_follows_occupancy_by_default(self):
+        _, text, _ = _build()
+        oa = self._schedule(text, 'OA_SCH')
+        self.assertEqual(oa[:8], ['For: SummerDesignDay', 'Until: 08:00', '0', 'Until: 18:00', '1', 'Until: 24:00', '0',
+                                  'For: WinterDesignDay'])
+
+    def test_lab_ventilates_continuously(self):
+        _, text, _ = _build(type='lab')
+        self.assertEqual(self._schedule(text, 'OA_SCH')[:3], ['For: SummerDesignDay', 'Until: 24:00', '1'])
+
+    def test_pre_start_moves_ventilation_and_setpoints_earlier(self):
+        sc, text, _ = _build(hvac_start_before_occ_h=2, setup_cool_c=29.0)
+        self.assertEqual(self._schedule(text, 'OA_SCH')[1:5], ['Until: 06:00', '0', 'Until: 18:00', '1'])
+        self.assertEqual(self._schedule(text, 'CLG_SP')[1:5], ['Until: 06:00', '29', 'Until: 18:00', _fmt_num(sc['t_cool_c'])])
+        # People and gains still start at occupancy.
+        self.assertEqual(self._schedule(text, 'OCC_SCH')[1:3], ['Until: 08:00', '0'])
+
+    def test_peaks_averaged_over_an_hour_of_timesteps(self):
+        _, text, model = _build()
+        self.assertRegex(text, r'Timestep,\n\s+%d;' % idf.TIMESTEPS_PER_HOUR)
+        self.assertEqual(model['timesteps_per_hour'], idf.TIMESTEPS_PER_HOUR)
 
     def test_infiltration_total_matches_ach(self):
         sc, _, model = _build(infiltration_ach=0.3)
@@ -199,6 +231,7 @@ class IddValidationTests(unittest.TestCase):
             {'n_floors': 2, 'overhang_pf': 0.5, 'erv_sensible_eff': 0.7},
             {'n_floors': 12, 'erv_sensible_eff': 0.7, 'erv_latent_eff': 0.6, 'thermal_mass': False,
              'setback_heat_c': 15.6, 'setup_cool_c': 29.4, 'wwr': 0.0},
+            {'type': 'lab', 'hvac_start_before_occ_h': 3, 'oa_unoccupied_fraction': 0.5},
         ]
         for v in variants:
             ddy = weather.parse_ddy(os.path.join(WEATHER, STEM + '.ddy'))
