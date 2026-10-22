@@ -197,6 +197,10 @@
       return {source: 'none', reason: SUR_LOADING[key] === 'error' ? 'load-error' : 'loading'};
     }
     if (!m) return {source: 'none', reason: 'no-model'};
+    // A model that missed the accuracy limit on its independent EnergyPlus test
+    // is not used: the page asks for an EnergyPlus run instead.
+    var failed = C.failedTest(m, sc.type);
+    if (failed) return {source: 'none', reason: 'failed-test', failed: failed};
     var r = C.surrogateResult(m, sc);
     if (r.incompatible) return {source: 'none', reason: 'incompatible'};
     if (r.fixedDiffs.length) return {source: 'none', reason: 'fixed', fixedDiffs: r.fixedDiffs};
@@ -643,6 +647,11 @@
         h += 'Loading the trained model…';
       } else if (res.reason === 'load-error') {
         h += 'The trained model file for this building type and station could not be loaded (data/surrogates/). Re-run <code>py engine/fit_surrogate.py</code>.';
+      } else if (res.reason === 'failed-test') {
+        h += 'The trained surrogate for ' + esc(D.archetypes.types[S.type].label) + ' in ' + esc(stationById(S.station).label) +
+          ' missed the accuracy limit on its independent test against ' + res.failed.n + ' fresh EnergyPlus runs (worst 95th-percentile error ' +
+          fmt(res.failed.worst, 1) + '%, limit ' + fmt(res.failed.limit, 1) + '%), so it is not used here.<br>' +
+          (engineOn ? 'Run EnergyPlus to calculate this scenario.' : 'Start the tool with <code>python server.py</code> on a machine with EnergyPlus installed to calculate this scenario.');
       } else if (res.reason === 'incompatible') {
         h += 'The trained surrogate for this building type and station was fitted by an older version of the tool.<br>' +
           'Re-run <code>py engine/fit_surrogate.py</code> (no new EnergyPlus runs needed), then reload this page.';

@@ -33,7 +33,7 @@ It is independent of the Total Carbon Tool: its own server, its own page, no sha
 | Use for | Numbers that go into a basis of design | Exploring options, ranking strategies |
 | Shown as | Green **EnergyPlus run** badge, with component breakdown, zone sizing, IDF download | Blue **Surrogate estimate** badge, with its out-of-sample error (95th percentile) |
 
-The surrogate is only used when the scenario is inside what it was trained on. If any input it held fixed during training has changed (for example supply air temperature or occupied hours), the page asks for an EnergyPlus run. If a varied input is outside its trained range, the page shows an extrapolation warning.
+The surrogate is only used when it passed its independent test against fresh EnergyPlus runs (see "Automatic testing against EnergyPlus"). Where a building type × station model missed the limit, the page shows no estimate and asks for an EnergyPlus run, giving the model's tested error. It is also only used when the scenario is inside what it was trained on. If any input it held fixed during training has changed (for example supply air temperature or occupied hours), the page asks for an EnergyPlus run. If a varied input is outside its trained range, the page shows an extrapolation warning.
 
 ## Quick start
 

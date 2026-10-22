@@ -141,6 +141,20 @@
         shared: model.type === 'unified'}};
   }
 
+  // Independent-test result that rules the model out for this building type:
+  // null when the model passed (or has not been tested), else the failing record.
+  // A shared (unified) model is judged on its result for this type.
+  function failedTest(model, type) {
+    var ho = model && model.holdout;
+    if (!ho) return null;
+    if (model.type === 'unified' && ho.per_type && ho.per_type[type]) {
+      return ho.per_type[type].passed ? null : {worst: ho.per_type[type].worst_governing_p95_pct, limit: ho.threshold_pct, n: ho.n};
+    }
+    if (ho.passed !== false) return null;
+    return {worst: ho.worst_governing_p95_pct != null ? ho.worst_governing_p95_pct : ho.worst_total_p95_pct,
+      limit: ho.threshold_pct, n: ho.n};
+  }
+
   // Convert an EnergyPlus run (engine/run_scenario.py JSON) into the same shape.
   function energyplusResult(run) {
     var dd = {};
@@ -164,7 +178,7 @@
   }
 
   var api = {
-    FEATURES: FEATURES, defaults: defaults, features: features, expand: expand, predict: predict, predictFeatures: predictFeatures,
+    FEATURES: FEATURES, defaults: defaults, features: features, expand: expand, predict: predict, predictFeatures: predictFeatures, failedTest: failedTest,
     surrogateResult: surrogateResult, energyplusResult: energyplusResult, governing: governing,
     KW_PER_TON: KW_PER_TON, MBH_PER_KW: MBH_PER_KW, CFM_PER_M3S: CFM_PER_M3S, FT2_PER_M2: FT2_PER_M2
   };

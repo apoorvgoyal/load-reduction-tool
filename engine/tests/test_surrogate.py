@@ -127,5 +127,31 @@ class DefaultsParityTests(unittest.TestCase):
                     self.assertEqual(pv, jv, '%s %s %s' % (t, cz, k))
 
 
+
+@unittest.skipUnless(NODE, 'node not installed')
+class GatingTests(unittest.TestCase):
+    """A model that failed its independent EnergyPlus test is not used (web/core.js failedTest)."""
+    def _failed(self, model, btype):
+        script = "var C=require(%r);console.log(JSON.stringify(C.failedTest(%s,%r)));" % (
+            os.path.join(TOOL, 'web', 'core.js'), json.dumps(model), btype)
+        return json.loads(subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True).stdout)
+
+    def test_failed_model_is_ruled_out(self):
+        ho = {'n': 51, 'passed': False, 'worst_governing_p95_pct': 9.5, 'threshold_pct': 5.0}
+        self.assertEqual(self._failed({'type': 'office', 'holdout': ho}, 'office'), {'worst': 9.5, 'limit': 5.0, 'n': 51})
+
+    def test_passed_or_untested_model_is_used(self):
+        self.assertIsNone(self._failed({'type': 'office', 'holdout': {'n': 51, 'passed': True}}, 'office'))
+        self.assertIsNone(self._failed({'type': 'office'}, 'office'))
+
+    def test_shared_model_judged_per_type(self):
+        ho = {'n': 51, 'passed': False, 'threshold_pct': 5.0,
+              'per_type': {'office': {'passed': True, 'worst_governing_p95_pct': 3.0},
+                           'school': {'passed': False, 'worst_governing_p95_pct': 8.0}}}
+        m = {'type': 'unified', 'holdout': ho}
+        self.assertIsNone(self._failed(m, 'office'))
+        self.assertEqual(self._failed(m, 'school'), {'worst': 8.0, 'limit': 5.0, 'n': 51})
+
+
 if __name__ == '__main__':
     unittest.main()
