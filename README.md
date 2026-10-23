@@ -179,6 +179,47 @@ Then open `diag1\eplusout.err` and look for the `** Severe  **` lines.
 
 Envelope defaults by climate zone were carried over from the Total Carbon Tool and still need checking against 90.1-2019 Tables 5.5. There are no built-in cost data; enter your own $/ton and $/MBH rates.
 
+## Surrogate test results
+
+Each building type × station model was tested by `engine/validate.py` against 51 EnergyPlus runs it never saw (independent sample, seed 9001, plus the type default). Peaks are one-hour averages. A model passes when the worst 95th-percentile error on the peaks the page reports is at most 5%. Models that fail are **not used by the page**; it asks for an EnergyPlus run instead.
+
+Training: 500 EnergyPlus runs per model, 1,500 for the 40 models that were still improving at 500 (EnergyPlus 25.2.0). Results from 2026-10-23.
+
+**194 of 243 models pass.** Cells show the worst P95 error on the reported peaks; failures in bold.
+
+| Station | higher ed | office | hotel | retail | healthcare | school | lab | stadium | sports |
+|---|---|---|---|---|---|---|---|---|---|
+| Albuquerque | 5.0 | 4.8 | 4.5 | 4.1 | **5.9** | **9.7** | **16.0** | **10.7** | **6.3** |
+| Atlanta | 2.0 | 2.0 | 2.1 | 2.3 | 1.4 | 1.6 | 1.7 | 2.9 | 2.7 |
+| Boston | 2.4 | 2.9 | 3.4 | 3.0 | 2.5 | 2.2 | 2.8 | 3.1 | 4.4 |
+| Buffalo | 3.7 | 3.5 | 2.7 | 3.6 | 3.0 | 2.9 | 1.2 | 4.1 | **5.6** |
+| Chicago | 1.9 | 3.1 | 2.4 | 2.7 | 2.8 | 2.7 | 0.9 | 3.2 | 3.1 |
+| Dallas-Fort Worth | 1.8 | 2.5 | 2.8 | 1.9 | 2.1 | 2.0 | 0.8 | 3.1 | 2.1 |
+| Denver | 3.8 | 4.9 | 4.3 | **5.3** | **8.8** | **7.8** | **13.7** | **11.8** | **5.9** |
+| El Paso | 2.3 | 2.6 | 2.9 | 4.3 | 4.4 | 2.9 | 4.2 | **7.4** | **12.2** |
+| Fairbanks | 3.4 | 4.8 | 2.9 | 3.5 | 4.5 | 4.5 | **10.4** | **5.7** | **6.6** |
+| Great Falls | 3.6 | 3.8 | 4.4 | 3.9 | 4.9 | **5.6** | **10.0** | 3.9 | **6.1** |
+| Honolulu | 2.9 | 3.8 | 4.3 | 3.6 | 2.4 | 2.7 | 3.5 | **8.7** | **6.1** |
+| Houston | 2.2 | 2.3 | 2.8 | 2.4 | 1.3 | 1.6 | 1.2 | 2.2 | 1.8 |
+| International Falls | 2.6 | 4.3 | 4.4 | 4.4 | 4.6 | 3.5 | **6.8** | **8.9** | **8.5** |
+| Kansas City | 2.2 | 2.8 | 2.6 | 2.5 | 1.8 | 2.7 | 1.8 | 3.0 | 2.3 |
+| Los Angeles | 3.4 | 4.3 | 3.9 | 3.6 | **8.0** | **10.4** | **11.7** | **23.6** | **22.3** |
+| Miami | 1.7 | 2.5 | 2.5 | 2.4 | 2.3 | 1.3 | 2.6 | 2.8 | 2.7 |
+| New York | 2.3 | 4.7 | 2.3 | 3.7 | 2.1 | 3.2 | 2.7 | 3.4 | 3.1 |
+| Phoenix | 2.0 | 2.3 | 2.0 | 1.6 | 1.5 | 2.0 | 2.3 | 3.9 | 1.8 |
+| Port Angeles | 3.9 | 3.7 | **6.3** | **6.2** | **6.5** | 4.7 | **12.0** | **17.1** | **50.3** |
+| Rochester | 3.2 | 3.0 | 4.2 | 4.7 | 3.4 | 2.0 | 1.6 | 4.7 | 4.2 |
+| San Diego | 2.1 | 3.7 | 2.7 | 3.7 | 3.0 | 2.4 | **5.6** | **12.6** | **13.2** |
+| San Francisco | 4.8 | 4.6 | 4.5 | **6.2** | **16.0** | **10.2** | **20.2** | **14.3** | **15.1** |
+| Seattle | 3.5 | 4.5 | 4.1 | 3.5 | 4.1 | 4.9 | **10.4** | **5.8** | **7.4** |
+| St. Louis | 2.4 | 2.3 | 2.1 | 3.0 | 1.4 | 1.8 | 2.4 | 2.5 | 2.2 |
+| Tampa | 2.3 | 2.9 | 2.1 | 1.7 | 1.9 | 2.0 | 1.9 | 2.1 | 1.9 |
+| Tucson | 2.8 | 3.2 | 3.6 | 3.4 | 2.6 | 3.4 | 1.5 | 5.0 | **7.2** |
+| Washington | 1.9 | 2.1 | 3.9 | 2.3 | 1.9 | 2.7 | 1.2 | 3.2 | 2.7 |
+| **Passing** | 27/27 | 27/27 | 26/27 | 24/27 | 22/27 | 22/27 | 17/27 | 16/27 | 13/27 |
+
+**Where the surrogate is not used, and why.** Almost every failure is a cooling peak in a mild coastal, dry or very cold climate (San Francisco, Los Angeles, San Diego, Port Angeles, Seattle, Denver, Albuquerque, El Paso, Great Falls, Fairbanks, International Falls). There the outdoor air is a load in some designs and a free-cooling credit in others, cooling peaks are small, and heat recovery switches on and off across the design space. Checked and ruled out as causes: EnergyPlus noise (sweeps of every input are smooth after the one-hour averaging), the regression form (gradient-boosted trees, a neural network and a hybrid did no better), a log scale, separate sensible and latent fits, and an outdoor-air load/credit feature. For the worst cases more training runs stopped helping between 250 and 500 runs. EnergyPlus runs remain accurate there; only the instant estimate is withheld.
+
 ## Validation plan
 
 1. **Engine checks.** ASHRAE Standard 140 and the RP-1052 load-calculation test cases, run through this model generator where they fit its form.
