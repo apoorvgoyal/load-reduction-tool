@@ -120,8 +120,16 @@
   function surrogateResult(model, sc, factors) {
     var p = predict(model, sc), dd = {}, gfa = sc.gfa_m2;
     var noRecovery = !(sc.erv_sensible_eff > 0) && !(sc.erv_latent_eff > 0);
+    var groups = null;
     Object.keys(p.perM2).forEach(function (name) {
       var parts = name.split('|'), key = parts[0], metric = parts[1];
+      // Zone load components (engine/lib/results.py component_groups): per m2,
+      // may be negative, never clamped.
+      if (key === 'comp_clg' || key === 'comp_htg') {
+        groups = groups || {cooling: {}, heating: {}};
+        groups[key === 'comp_clg' ? 'cooling' : 'heating'][metric.replace(/_w_m2$/, '')] = p.perM2[name] * gfa;
+        return;
+      }
       var r = dd[key] || (dd[key] = {key: key, kind: key.indexOf('htg') === 0 ? 'heating' : 'cooling'});
       // Loads can't be negative; with no heat recovery the recovered amount is
       // exactly zero (otherwise the fit's noise around zero would show).
@@ -135,7 +143,7 @@
       else if (metric === 'supply_ls_m2') r.supply_air_m3s = v * gfa / 1000;
       else if (metric === 'sum_of_peaks_w_m2') r.sum_of_zone_peaks_w = v * gfa;
     });
-    return {source: 'surrogate', gfa: gfa, dd: dd, extrapolated: p.extrapolated, fixedDiffs: p.fixedDiffs,
+    return {source: 'surrogate', gfa: gfa, dd: dd, groups: groups, extrapolated: p.extrapolated, fixedDiffs: p.fixedDiffs,
       incompatible: !!p.incompatible,
       model: {n: model.n_samples, eplus: model.eplus_versions, fitted: model.fitted_at, holdout: model.holdout || null,
         shared: model.type === 'unified'}};
@@ -165,7 +173,25 @@
         sum_of_zone_peaks_w: d.sum_of_zone_peaks_w, time: b.time, outdoor_db_c: b.outdoor_db_c,
         profile: d.profile};
     });
-    return {source: 'energyplus', gfa: run.scenario.gfa_m2, dd: dd, run: run};
+    return {source: 'energyplus', gfa: run.scenario.gfa_m2, dd: dd, groups: run.component_groups || null, run: run};
+  }
+
+  // Load breakdown categories, in display order (engine/lib/results.py).
+  var COMPONENTS = ['people', 'lighting', 'equipment', 'window_solar', 'window_conduction', 'walls', 'roof',
+    'ground_floor', 'infiltration', 'internal_mass'];
+
+  // Where a block peak comes from, W per category, summing to the block total.
+  // Mirrors engine/lib/results.py breakdown(): the zone part of the peak is
+  // split in the proportions of the zone components; ventilation (before
+  // recovery) and the recovery credit come from the block peak itself.
+  function breakdown(groups, block) {
+    var total = block.total_w, oa = block.outdoor_air_w || 0, hr = block.heat_recovery_w || 0;
+    var zonePart = total - oa + hr, s = 0, out = {};
+    COMPONENTS.forEach(function (c) { s += (groups && groups[c]) || 0; });
+    COMPONENTS.forEach(function (c) { out[c] = Math.abs(s) > 1e-9 ? ((groups && groups[c]) || 0) / s * zonePart : 0; });
+    out.ventilation = oa;
+    out.heat_recovery = -hr;
+    return out;
   }
 
   // Governing design days for the chosen percentiles; sizing factors applied
@@ -178,7 +204,7 @@
   }
 
   var api = {
-    FEATURES: FEATURES, defaults: defaults, features: features, expand: expand, predict: predict, predictFeatures: predictFeatures, failedTest: failedTest,
+    FEATURES: FEATURES, defaults: defaults, features: features, expand: expand, predict: predict, predictFeatures: predictFeatures, failedTest: failedTest, breakdown: breakdown, COMPONENTS: COMPONENTS,
     surrogateResult: surrogateResult, energyplusResult: energyplusResult, governing: governing,
     KW_PER_TON: KW_PER_TON, MBH_PER_KW: MBH_PER_KW, CFM_PER_M3S: CFM_PER_M3S, FT2_PER_M2: FT2_PER_M2
   };

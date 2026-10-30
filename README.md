@@ -151,6 +151,7 @@ Then open `diag1\eplusout.err` and look for the `** Severe  **` lines.
   - Sensible and latent loads, the ventilation (outdoor-air) load before heat recovery and the amount recovered, and supply airflow at peak. The coil totals already include the recovery credit.
   - Peak hour (time = end of the hour) and the 24-hour profile at 10-minute resolution.
   - EnergyPlus's zone component load summary and zone sizing table.
+  - **Load breakdown** (`results.breakdown`): where each block peak comes from (people, lighting, equipment, window solar, window conduction, walls, roof, ground floor, infiltration, internal mass, ventilation, heat recovery), summing exactly to the block peak. The zone part of the peak (total less the ventilation load net of recovery) is split in the proportions of EnergyPlus's Zone Component Load Summary (each zone at its own design peak, scaled); ventilation and recovery come from the ideal-loads outputs at the block peak hour. Cooling counts sensible + latent components; heating counts sensible only, because the ideal-loads system does not humidify. The proportions come from each zone's governing design peak, so at other percentiles the split is an approximation.
   - The IDF, for anyone who wants to inspect or rerun it.
 - **Sizing factors.** Default 1.0 and applied visibly. Results always show whether a factor is included.
 

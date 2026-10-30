@@ -12,7 +12,8 @@ sys.path.insert(0, os.path.dirname(HERE))
 from lib import results  # noqa: E402
 
 
-def make_sql(path, series, env_names, components=None, warmup_noise=True):
+def make_sql(path, series, env_names, components=None, warmup_noise=True,
+             component_report='ZoneComponentLoadSummary'):
     """series: {env_name: {var: {key: [values per timestep]}}}"""
     con = sqlite3.connect(path)
     c = con.cursor()
@@ -70,7 +71,7 @@ def make_sql(path, series, env_names, components=None, warmup_noise=True):
                     c.execute('INSERT INTO ReportData VALUES (?,?,?,?)', (rdi, first + step, di[(key, var)], v))
     for i, (zone, table, row, col, val) in enumerate(components or []):
         c.execute('INSERT INTO TabularDataWithStrings VALUES (?,?,?,?,?,?,?,?)',
-                  (i, str(val), 'ZoneComponentLoadSummary', zone, table, row, col, 'W'))
+                  (i, str(val), component_report, zone, table, row, col, 'W'))
     con.commit()
     con.close()
 
@@ -151,6 +152,34 @@ class ResultsTests(unittest.TestCase):
         self.assertAlmostEqual(r['components']['cooling']['People']['Total'], 100 + 30)
         self.assertNotIn('Grand Total', r['components']['cooling'])
         self.assertAlmostEqual(r['components']['heating']['Infiltration']['Sensible - Instant'], -5)
+
+    def test_components_read_under_energyplus_25_report_name(self):
+        # EnergyPlus 25.2 writes the report as "Zone Component Load Summary".
+        sql = os.path.join(self.tmp, 'named.sql')
+        make_sql(sql, {'X ANN CLG .4% CONDNS DB=>MWB': {results.V_CLG_TOT: {'G_S IDEAL LOADS': [1, 2, 3]}}}, None,
+                 components=[('G_S', 'Estimated Cooling Peak Load Components', 'People', 'Total', 100)],
+                 component_report='Zone Component Load Summary')
+        r = results.parse_sql(sql, self.model)
+        self.assertAlmostEqual(r['components']['cooling']['People']['Total'], 100)
+
+    def test_breakdown_sums_to_block_peak(self):
+        comps = {'cooling': {'People': {'Total': 30.0}, 'Fenestration Solar': {'Total': 50.0},
+                             'Interzone Floor': {'Total': -5.0}, 'Infiltration': {'Total': 25.0}},
+                 'heating': {'Infiltration': {'Sensible - Instant': -40.0, 'Latent': -30.0, 'Total': -70.0},
+                             'Exterior Wall': {'Sensible - Delayed': -10.0, 'Total': -10.0}}}
+        g = results.component_groups(comps)
+        # Heating counts sensible only, as positive losses (no humidification).
+        self.assertAlmostEqual(g['heating']['infiltration'], 40.0)
+        self.assertAlmostEqual(g['heating']['walls'], 10.0)
+        self.assertAlmostEqual(g['cooling']['internal_mass'], -5.0)
+        block = {'total_w': 200.0, 'outdoor_air_w': 80.0, 'heat_recovery_w': 30.0}
+        b = results.breakdown(g['cooling'], block)
+        self.assertAlmostEqual(sum(b.values()), 200.0)
+        self.assertAlmostEqual(b['ventilation'], 80.0)
+        self.assertAlmostEqual(b['heat_recovery'], -30.0)
+        # Zone part = 200 - 80 + 30 = 150, split 30:50:-5:25 of 100.
+        self.assertAlmostEqual(b['window_solar'], 75.0)
+        self.assertAlmostEqual(b['internal_mass'], -7.5)
 
     def test_summarize_picks_larger_cooling_day(self):
         dd = {'clg_db_1': {'key': 'clg_db_1', 'block': {'total_w': 10}},

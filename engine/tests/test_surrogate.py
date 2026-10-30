@@ -153,5 +153,27 @@ class GatingTests(unittest.TestCase):
         self.assertEqual(self._failed(m, 'school'), {'worst': 8.0, 'limit': 5.0, 'n': 51})
 
 
+
+@unittest.skipUnless(NODE, 'node not installed')
+class BreakdownParityTests(unittest.TestCase):
+    def test_js_breakdown_matches_python(self):
+        from lib import results
+        groups = {'people': 12.5, 'lighting': 30.0, 'equipment': 41.0, 'window_solar': 55.5, 'window_conduction': 20.0,
+                  'walls': 8.0, 'roof': 6.0, 'ground_floor': -3.0, 'infiltration': 17.0, 'internal_mass': -4.5}
+        blocks = [{'total_w': 250.0, 'outdoor_air_w': 90.0, 'heat_recovery_w': 25.0},
+                  {'total_w': 180.0, 'outdoor_air_w': None, 'heat_recovery_w': None}]
+        script = "var C=require(%r);console.log(JSON.stringify(%s.map(function(b){return C.breakdown(%s,b);})));" % (
+            os.path.join(TOOL, 'web', 'core.js'), json.dumps(blocks), json.dumps(groups))
+        js = json.loads(subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True).stdout)
+        for b, j in zip(blocks, js):
+            py = results.breakdown(groups, b)
+            self.assertEqual(sorted(py), sorted(j))
+            for k in py:
+                self.assertAlmostEqual(py[k], j[k], places=9, msg=k)
+        script = "var C=require(%r);console.log(JSON.stringify(C.COMPONENTS));" % os.path.join(TOOL, 'web', 'core.js')
+        order = json.loads(subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(order, [c for c, _ in results.COMPONENT_GROUPS])
+
+
 if __name__ == '__main__':
     unittest.main()

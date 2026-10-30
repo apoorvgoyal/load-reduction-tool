@@ -95,7 +95,9 @@ def predict(model, sc):
     no_recovery = not (sc['erv_sensible_eff'] > 0) and not (sc['erv_latent_eff'] > 0)
     out = {}
     for name, o in model['outputs'].items():
-        v = max(0.0, sum(c * xx for c, xx in zip(o['coef'], X)))
+        v = sum(c * xx for c, xx in zip(o['coef'], X))
+        if not name.startswith('comp_'):
+            v = max(0.0, v)       # loads can't be negative; components can
         if name.endswith('|hr_w_m2') and no_recovery:
             v = 0.0
         out[name] = v

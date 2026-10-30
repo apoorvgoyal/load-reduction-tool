@@ -9,6 +9,8 @@ the raw-input feature set.
 """
 import math
 
+from . import results
+
 FEATURES = [
     'ext_wall_m2_per_m2', 'window_m2_per_m2', 'wall_ua_per_m2', 'window_ua_per_m2', 'roof_ua_per_m2',
     'slab_fp_per_m2', 'infiltration_m3h_per_m2', 'solar_aperture_per_m2', 'shaded_aperture_per_m2',
@@ -71,7 +73,7 @@ def features(sc):
 
 
 # Targets fitted per design day, all normalised per m2 of gross floor area.
-def targets(design_days, gfa):
+def targets(design_days, gfa, components=None):
     out = {}
     for key, dd in design_days.items():
         b = dd['block']
@@ -87,4 +89,10 @@ def targets(design_days, gfa):
         if b.get('supply_air_m3s') is not None:
             out[key + '|supply_ls_m2'] = b['supply_air_m3s'] * 1000.0 / gfa
         out[key + '|sum_of_peaks_w_m2'] = dd['sum_of_zone_peaks_w'] / gfa
+    # Zone load components (lib/results.py component_groups), per m2. These can
+    # be negative (a slab storing heat), so predictions are not clamped at 0.
+    groups = results.component_groups(components)
+    for kind, prefix in (('cooling', 'comp_clg'), ('heating', 'comp_htg')):
+        for cat, v in ((groups or {}).get(kind) or {}).items():
+            out['%s|%s_w_m2' % (prefix, cat)] = v / gfa
     return out

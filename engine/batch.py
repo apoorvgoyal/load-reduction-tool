@@ -147,7 +147,7 @@ def _work(args):
         return i, user, None, json.dumps({k: r.get(k) for k in ('error', 'messages')})
     sc = r['scenario']
     rec = {'id': i, 'scenario': sc, 'features': features.features(sc),
-           'targets': features.targets(r['design_days'], sc['gfa_m2']),
+           'targets': features.targets(r['design_days'], sc['gfa_m2'], r.get('components')),
            'eplus': r['engine']['version'], 'warnings': r['messages']['warnings'],
            'severe': r['messages']['severe'],
            'severe_messages': r['messages'].get('severe_messages', [])[:5],

@@ -198,7 +198,7 @@ def _components(con, scale):
     try:
         rows = con.execute(
             "SELECT ReportForString, TableName, RowName, ColumnName, Value FROM TabularDataWithStrings "
-            "WHERE ReportName = 'ZoneComponentLoadSummary' AND TableName IN "
+            "WHERE ReportName IN ('ZoneComponentLoadSummary', 'Zone Component Load Summary') AND TableName IN "
             "('Estimated Cooling Peak Load Components', 'Estimated Heating Peak Load Components')").fetchall()
     except sqlite3.Error:
         return None
@@ -220,6 +220,69 @@ def _components(con, scale):
         rec[col] += v * scale[z]
     for kind in out:
         out[kind] = {k: v for k, v in out[kind].items() if any(abs(x) > 1e-9 for x in v.values())}
+    return out
+
+
+# EnergyPlus component rows -> the categories the page shows. Interzone
+# surfaces are adiabatic here, so their rows are heat stored in and released
+# by the floor/ceiling slabs and partitions ("internal mass").
+COMPONENT_GROUPS = (
+    ('people', ('People',)),
+    ('lighting', ('Lights',)),
+    ('equipment', ('Equipment', 'Refrigeration', 'Water Use Equipment', 'HVAC Equipment Losses',
+                   'Power Generation Equipment')),
+    ('window_solar', ('Fenestration Solar',)),
+    ('window_conduction', ('Fenestration Conduction',)),
+    ('walls', ('Exterior Wall', 'Other Wall', 'Ground Contact Wall', 'Opaque Door')),
+    ('roof', ('Roof', 'Other Roof')),
+    ('ground_floor', ('Ground Contact Floor', 'Exterior Floor', 'Other Floor')),
+    ('infiltration', ('Infiltration',)),
+    ('internal_mass', ('Interzone Ceiling', 'Interzone Floor', 'Interzone Wall', 'Interzone Mixing',
+                       'Zone Ventilation', 'DOAS Direct to Zone')),
+)
+SENSIBLE_COLUMNS = ('Sensible - Instant', 'Sensible - Delayed', 'Sensible - Return Air')
+
+
+def component_groups(components):
+    """Zone-level load components per category, W, from EnergyPlus's Zone
+    Component Load Summary (each zone at its own design peak, scaled).
+
+    Cooling counts sensible + latent (the coil dehumidifies). Heating counts
+    sensible only, as a positive loss: the ideal-loads system does not
+    humidify, so EnergyPlus's latent heating rows are not a coil load."""
+    if not components:
+        return None
+    out = {}
+    for kind in ('cooling', 'heating'):
+        rows = components.get(kind) or {}
+        grp = {}
+        for cat, names in COMPONENT_GROUPS:
+            v = 0.0
+            for name in names:
+                r = rows.get(name)
+                if not r:
+                    continue
+                v += r.get('Total', 0.0) if kind == 'cooling' else sum(r.get(c, 0.0) for c in SENSIBLE_COLUMNS)
+            grp[cat] = v if kind == 'cooling' else -v
+        out[kind] = grp
+    return out
+
+
+def breakdown(groups, block):
+    """Where a block peak comes from, W per category, summing to block total.
+
+    The zone part of the peak (total less the ventilation load net of heat
+    recovery) is split in the proportions of the zone components; the
+    ventilation load before recovery and the recovery credit come from the
+    ideal-loads outputs at the block peak hour. Mirrored in web/core.js."""
+    total = block['total_w']
+    oa = block.get('outdoor_air_w') or 0.0
+    hr = block.get('heat_recovery_w') or 0.0
+    zone_part = total - oa + hr
+    s = sum(groups.values()) if groups else 0.0
+    out = {cat: (groups[cat] / s * zone_part if abs(s) > 1e-9 else 0.0) for cat, _ in COMPONENT_GROUPS}
+    out['ventilation'] = oa
+    out['heat_recovery'] = -hr
     return out
 
 
