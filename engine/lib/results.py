@@ -56,6 +56,7 @@ def parse_sql(sql_path, model):
 
 def _parse(con, model):
     scale = {z['name'].upper(): z['scale'] for z in model['zones']}
+    floor_of = {z['name'].upper(): z.get('floor', '') for z in model['zones']}
     env_key = model['design_day_env_names']   # upper-case env name -> key
 
     envs = {}
@@ -140,8 +141,27 @@ def _parse(con, model):
         # change to the peak definition needs a refit, not new EnergyPlus runs.
         hourly_means = [sum(ser[main][t] for t in steps[i:i + n]) / len(steps[i:i + n])
                         for i in range(0, len(steps), n)]
+        # Per modelled floor (G, M, T or S), one floor's worth (unscaled):
+        # clock-hour block totals plus the ventilation load and heat recovered
+        # in that floor's peak hour. Floors exchange no heat (adiabatic slabs),
+        # so a building of mixed uses is the sum of its floors.
+        floors = {}
+        for fk in sorted(set(floor_of.values())):
+            zs = [z for z, f in floor_of.items() if f == fk]
+
+            def fsum(var):
+                zv = zser.get(env, {}).get(var, {})
+                return {t: sum(zv.get(z, {}).get(t, 0.0) for z in zs) for t in steps}
+            ftot = fsum(main)
+            fh = [sum(ftot[t] for t in steps[i:i + n]) / len(steps[i:i + n]) for i in range(0, len(steps), n)]
+            ipk = max(range(len(fh)), key=lambda i: (fh[i], -i))
+            hours = steps[ipk * n:(ipk + 1) * n]
+            foa, fhr = fsum(V_OA_HTG if is_htg else V_OA_CLG), fsum(V_HR_HTG if is_htg else V_HR_CLG)
+            floors[fk] = {'hourly_w': fh, 'oa_w': sum(foa[t] for t in hours) / len(hours),
+                          'hr_w': sum(fhr[t] for t in hours) / len(hours)}
         design_days[env] = {
             'key': env,
+            'floors': floors,
             'kind': 'heating' if is_htg else 'cooling',
             'block': block,
             'sum_of_zone_peaks_w': sop,
@@ -154,6 +174,7 @@ def _parse(con, model):
         'design_days': design_days,
         'zone_sizing': _zone_sizes(con, scale),
         'components': _components(con, scale),
+        'components_by_floor': _components(con, {z: 1 for z in scale}, floor_of),
     }
 
 
@@ -192,9 +213,10 @@ def _zone_sizes(con, scale):
     return out
 
 
-def _components(con, scale):
+def _components(con, scale, floor_of=None):
     """Zone component load tables, scaled and summed across zones.
-    These are each zone's own peak (non-coincident)."""
+    These are each zone's own peak (non-coincident). With floor_of, the sums
+    are kept per modelled floor instead: {floor: {'cooling': …, 'heating': …}}."""
     try:
         rows = con.execute(
             "SELECT ReportForString, TableName, RowName, ColumnName, Value FROM TabularDataWithStrings "
@@ -205,6 +227,7 @@ def _components(con, scale):
     if not rows:
         return None
     out = {'cooling': {}, 'heating': {}}
+    by_floor = {}
     for zone, table, row, col, val in rows:
         if col not in COMPONENT_COLUMNS or row in ('Grand Total',):
             continue
@@ -216,11 +239,13 @@ def _components(con, scale):
         except (TypeError, ValueError):
             continue
         kind = 'cooling' if 'Cooling' in table else 'heating'
-        rec = out[kind].setdefault(row.strip(), {c: 0.0 for c in COMPONENT_COLUMNS})
+        tgt = by_floor.setdefault(floor_of[z], {'cooling': {}, 'heating': {}}) if floor_of else out
+        rec = tgt[kind].setdefault(row.strip(), {c: 0.0 for c in COMPONENT_COLUMNS})
         rec[col] += v * scale[z]
-    for kind in out:
-        out[kind] = {k: v for k, v in out[kind].items() if any(abs(x) > 1e-9 for x in v.values())}
-    return out
+    for o in ([out] if not floor_of else list(by_floor.values())):
+        for kind in o:
+            o[kind] = {k: v for k, v in o[kind].items() if any(abs(x) > 1e-9 for x in v.values())}
+    return by_floor if floor_of else out
 
 
 # EnergyPlus component rows -> the categories the page shows. Interzone

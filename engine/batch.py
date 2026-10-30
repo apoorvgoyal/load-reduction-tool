@@ -31,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import run_scenario  # noqa: E402
-from lib import features, runs, scenario  # noqa: E402
+from lib import results, features, runs, scenario  # noqa: E402
 
 RUNS = os.path.join(HERE, 'runs')
 
@@ -146,6 +146,7 @@ def _work(args):
     if not r.get('ok'):
         return i, user, None, json.dumps({k: r.get(k) for k in ('error', 'messages')})
     sc = r['scenario']
+    plate = sc['gfa_m2'] / sc['n_floors']
     rec = {'id': i, 'scenario': sc, 'features': features.features(sc),
            'targets': features.targets(r['design_days'], sc['gfa_m2'], r.get('components')),
            'eplus': r['engine']['version'], 'warnings': r['messages']['warnings'],
@@ -157,7 +158,18 @@ def _work(args):
            'hourly_w_m2': {k: [round(v / sc['gfa_m2'], 2) for v in dd.get('hourly_means_w', [])]
                            for k, dd in r['design_days'].items()},
            'max_timestep_w_m2': {k: round(dd['block']['max_timestep_w'] / sc['gfa_m2'], 2)
-                                 for k, dd in r['design_days'].items() if dd['block'].get('max_timestep_w') is not None}}
+                                 for k, dd in r['design_days'].items() if dd['block'].get('max_timestep_w') is not None},
+           # Per modelled floor (G ground, M one middle floor, T top, S single),
+           # per m2 of that floor: clock-hour totals per design day, the
+           # ventilation load and heat recovered in its peak hour, and its load
+           # components. Lets mixed-use buildings be assembled floor by floor.
+           'floors_w_m2': {k: {f: {'hourly': [round(v / plate, 2) for v in fd['hourly_w']],
+                                   'oa': round(fd['oa_w'] / plate, 2), 'hr': round(fd['hr_w'] / plate, 2)}
+                               for f, fd in (dd.get('floors') or {}).items()}
+                           for k, dd in r['design_days'].items()},
+           'floor_components_w_m2': {f: {kind: {c: round(v / plate, 3) for c, v in g.items()} for kind, g in grp.items()}
+                                     for f, grp in ((f, results.component_groups(c))
+                                                    for f, c in (r.get('components_by_floor') or {}).items()) if grp}}
     if component:
         rec['component'] = component
     return i, user, rec, None

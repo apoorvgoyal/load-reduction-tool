@@ -95,6 +95,7 @@ def run(user, include_idf=False, keep_dir=None, exe=None, version=None):
             'zone_sizing': parsed['zone_sizing'],
             'components': parsed['components'],
             'component_groups': results.component_groups(parsed['components']),
+            'components_by_floor': parsed['components_by_floor'],
             'messages': msgs,
         }
         if include_idf:

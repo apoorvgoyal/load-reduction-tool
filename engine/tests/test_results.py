@@ -147,6 +147,22 @@ class ResultsTests(unittest.TestCase):
         self.assertAlmostEqual(c['sum_of_zone_peaks_w'], 55 + 30)
         self.assertEqual(c['hourly_means_w'], [50, 45, 70])
 
+    def test_floors_sum_to_building(self):
+        model = dict(self.model, zones=[{'name': 'G_S', 'scale': 1, 'floor': 'G'}, {'name': 'M_S', 'scale': 3, 'floor': 'M'}])
+        r = results.parse_sql(self.sql, model)
+        c = r['design_days']['clg_db_0.4']
+        f = c['floors']
+        self.assertEqual(sorted(f), ['G', 'M'])
+        # One floor's worth (unscaled); x scale and summed = the building
+        self.assertEqual(f['M']['hourly_w'], [30, 10, 25])
+        for h in range(3):
+            self.assertAlmostEqual(f['G']['hourly_w'][h] + 3 * f['M']['hourly_w'][h], c['hourly_means_w'][h])
+        # Ventilation in each floor's own peak hour (G peaks at step 1, M at step 0)
+        self.assertAlmostEqual(f['G']['oa_w'], 9)
+        self.assertAlmostEqual(f['M']['oa_w'], 5)
+        self.assertEqual(sorted(r['components_by_floor']), ['G', 'M'])
+        self.assertAlmostEqual(r['components_by_floor']['M']['cooling']['People']['Total'], 10)
+
     def test_components_scaled_and_grand_total_dropped(self):
         r = results.parse_sql(self.sql, self.model)
         self.assertAlmostEqual(r['components']['cooling']['People']['Total'], 100 + 30)
