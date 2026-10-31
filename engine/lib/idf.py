@@ -54,6 +54,15 @@ OUTPUT_VARIABLES = [
     'Site Outdoor Air Drybulb Temperature',
 ]
 
+# Annual runs: monthly totals (energy) and monthly means (airflow).
+ANNUAL_VARIABLES = [
+    'Zone Ideal Loads Supply Air Total Cooling Energy',
+    'Zone Ideal Loads Supply Air Total Heating Energy',
+    'Lights Electricity Energy',
+    'Electric Equipment Electricity Energy',
+    'Zone Ideal Loads Supply Air Standard Density Volume Flow Rate',
+]
+
 
 class IdfWriter:
     """Accumulates objects as (type, [(field name, value), ...])."""
@@ -183,9 +192,30 @@ def compact_day(profile):
     return out
 
 
-def compact_schedule(w, name, limits, summer, winter, other):
+WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+
+def occupied_day_types(days):
+    """Schedule:Compact day types for the first `days` days of the week."""
+    days = int(days)
+    if days == 5:
+        return 'Weekdays'
+    if days == 6:
+        return 'Weekdays Saturday'
+    return ' '.join(WEEK[:days])
+
+
+def compact_schedule(w, name, limits, summer, winter, other, unoccupied=None, days=7):
+    """Design days first, then the ordinary days. With fewer than 7 occupied
+    days a week, the occupied days take `other` and every remaining day
+    (including holidays) takes `unoccupied`. Design days are unaffected."""
     vals = ['Through: 12/31']
-    for label, prof in (('SummerDesignDay', summer), ('WinterDesignDay', winter), ('AllOtherDays', other)):
+    rows = [('SummerDesignDay', summer), ('WinterDesignDay', winter)]
+    if unoccupied is not None and int(days) < 7:
+        rows += [(occupied_day_types(days), other), ('AllOtherDays', unoccupied)]
+    else:
+        rows += [('AllOtherDays', other)]
+    for label, prof in rows:
         vals.append('For: ' + label)
         vals += compact_day(prof)
     w.add('Schedule:Compact', [('Name', name), ('Schedule Type Limits Name', limits)] +
@@ -194,9 +224,12 @@ def compact_schedule(w, name, limits, summer, winter, other):
 
 # ── Builder ─────────────────────────────────────────────────────────────────
 
-def build(sc, ddy, stat, eplus_version='25.2'):
+def build(sc, ddy, stat, eplus_version='25.2', annual=False):
     """Return (idf_text, model_info). model_info carries geometry facts and
-    the per-zone scale factors needed by the results parser."""
+    the per-zone scale factors needed by the results parser.
+
+    annual=True runs a full year on the station's weather file instead of the
+    design days, with monthly energy outputs (lib/results.py parse_annual)."""
     w = IdfWriter()
     h = sc['floor_to_floor_m']
     length, width = footprint(sc)
@@ -208,8 +241,8 @@ def build(sc, ddy, stat, eplus_version='25.2'):
         ('Do Zone Sizing Calculation', True),
         ('Do System Sizing Calculation', False),
         ('Do Plant Sizing Calculation', False),
-        ('Run Simulation for Sizing Periods', True),
-        ('Run Simulation for Weather File Run Periods', False),
+        ('Run Simulation for Sizing Periods', not annual),
+        ('Run Simulation for Weather File Run Periods', annual),
         ('Do HVAC Sizing Simulation for Sizing Periods', False),
         ('Maximum Number of HVAC Sizing Simulation Passes', 1)])
     w.add('Building', [
@@ -259,6 +292,17 @@ def build(sc, ddy, stat, eplus_version='25.2'):
         env_names[dd['name'].upper()] = key
 
     w.add('Sizing:Parameters', [('Heating Sizing Factor', 1.0), ('Cooling Sizing Factor', 1.0)])
+    if annual:
+        # One year of the station's typical-year weather file. The start day of
+        # the week is left blank, which EnergyPlus takes as Sunday.
+        w.add('RunPeriod', [('Name', 'Annual'), ('Begin Month', 1), ('Begin Day of Month', 1), ('Begin Year', ''),
+                            ('End Month', 12), ('End Day of Month', 31), ('End Year', ''),
+                            ('Day of Week for Start Day', ''),
+                            ('Use Weather File Holidays and Special Days', False),
+                            ('Use Weather File Daylight Saving Period', False),
+                            ('Apply Weekend Holiday Rule', False),
+                            ('Use Weather File Rain Indicators', True),
+                            ('Use Weather File Snow Indicators', True)])
     gt = stat.get('ground_temps_0p5m')
     if not gt:
         raise ValueError('station .stat file has no 0.5 m ground temperatures')
@@ -283,8 +327,9 @@ def build(sc, ddy, stat, eplus_version='25.2'):
     zero = [0.0] * 24
     one = [1.0] * 24
     # Heating design day carries no internal gains (standard conservative practice).
-    compact_schedule(w, 'OCC_SCH', 'Fraction', occ, zero, occ)
-    compact_schedule(w, 'GAINS_SCH', 'Fraction', gains, zero, gains)
+    days = int(sc.get('occ_days_per_week', 7))
+    compact_schedule(w, 'OCC_SCH', 'Fraction', occ, zero, occ, zero, days)
+    compact_schedule(w, 'GAINS_SCH', 'Fraction', gains, zero, gains, [uf] * 24, days)
     # Systems start hvac_start_before_occ_h ahead of occupancy: ventilation at
     # the design rate and occupied setpoints from then on, so the space is
     # conditioned (and dried) before people arrive. Outside that window outdoor
@@ -293,7 +338,8 @@ def build(sc, ddy, stat, eplus_version='25.2'):
     pre = int(sc.get('hvac_start_before_occ_h', 0))
     s_on, h_on = s0 - pre, min(24, nh + pre)
     oa = hourly_profile(s_on, h_on, 1.0, float(sc.get('oa_unoccupied_fraction', 0.0)))
-    compact_schedule(w, 'OA_SCH', 'Fraction', oa, oa, oa)
+    oa_off = float(sc.get('oa_unoccupied_fraction', 0.0))
+    compact_schedule(w, 'OA_SCH', 'Fraction', oa, oa, oa, [oa_off] * 24, days)
     compact_schedule(w, 'ALWAYS_ON', 'Fraction', one, one, one)
     act = [float(sc['activity_w_per_person'])] * 24
     compact_schedule(w, 'ACTIVITY_SCH', 'Any Number', act, act, act)
@@ -304,8 +350,8 @@ def build(sc, ddy, stat, eplus_version='25.2'):
     su = sc['setup_cool_c'] if sc.get('setup_cool_c') is not None else tc
     htg = hourly_profile(s_on, h_on, th, sb)
     clg = hourly_profile(s_on, h_on, tc, su)
-    compact_schedule(w, 'HTG_SP', 'Temperature', htg, htg, htg)
-    compact_schedule(w, 'CLG_SP', 'Temperature', clg, clg, clg)
+    compact_schedule(w, 'HTG_SP', 'Temperature', htg, htg, htg, [sb] * 24, days)
+    compact_schedule(w, 'CLG_SP', 'Temperature', clg, clg, clg, [su] * 24, days)
     w.add('ThermostatSetpoint:DualSetpoint', [('Name', 'DualSP'),
                                               ('Heating Setpoint Temperature Schedule Name', 'HTG_SP'),
                                               ('Cooling Setpoint Temperature Schedule Name', 'CLG_SP')])
@@ -519,8 +565,9 @@ def build(sc, ddy, stat, eplus_version='25.2'):
                 totals[k] += info[k] * scale
             zones_info.append(info)
 
-    for var in OUTPUT_VARIABLES:
-        w.add('Output:Variable', [('Key Value', '*'), ('Variable Name', var), ('Reporting Frequency', 'Timestep')])
+    for var in (ANNUAL_VARIABLES if annual else OUTPUT_VARIABLES):
+        w.add('Output:Variable', [('Key Value', '*'), ('Variable Name', var),
+                                  ('Reporting Frequency', 'Monthly' if annual else 'Timestep')])
     w.add('Output:Table:SummaryReports', [('Report Name', r) for r in (
         'InputVerificationandResultsSummary', 'EnvelopeSummary', 'HVACSizingSummary',
         'ZoneComponentLoadSummary')])
@@ -536,6 +583,7 @@ def build(sc, ddy, stat, eplus_version='25.2'):
         'wwr_modelled': totals['window_m2'] / totals['ext_wall_m2'] if totals['ext_wall_m2'] else 0.0,
         'design_day_env_names': env_names,
         'timesteps_per_hour': TIMESTEPS_PER_HOUR,
+        'annual': annual,
         'eplus_version_target': eplus_version,
     }
     return w.text(), model

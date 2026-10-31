@@ -76,6 +76,49 @@ def make_sql(path, series, env_names, components=None, warmup_noise=True,
     con.close()
 
 
+def make_annual_sql(path, monthly):
+    """monthly: {(var, key): [12 values]} in J (energy) or m3/s (airflow)."""
+    con = sqlite3.connect(path)
+    c = con.cursor()
+    c.execute('CREATE TABLE EnvironmentPeriods (EnvironmentPeriodIndex INTEGER, SimulationIndex INTEGER, '
+              'EnvironmentName TEXT, EnvironmentType INTEGER)')
+    c.execute("INSERT INTO EnvironmentPeriods VALUES (1, 1, 'ANNUAL', 3)")
+    c.execute('CREATE TABLE Time (TimeIndex INTEGER, Month INTEGER, Day INTEGER, Hour INTEGER, Minute INTEGER, '
+              'EnvironmentPeriodIndex INTEGER, WarmupFlag INTEGER)')
+    for m in range(12):
+        c.execute('INSERT INTO Time VALUES (?,?,?,?,?,?,?)', (m + 1, m + 1, 28, 24, 0, 1, 0))
+    c.execute('CREATE TABLE ReportDataDictionary (ReportDataDictionaryIndex INTEGER, KeyValue TEXT, Name TEXT, '
+              'ReportingFrequency TEXT)')
+    c.execute('CREATE TABLE ReportData (TimeIndex INTEGER, ReportDataDictionaryIndex INTEGER, Value REAL)')
+    for i, ((var, key), vals) in enumerate(monthly.items(), start=1):
+        c.execute('INSERT INTO ReportDataDictionary VALUES (?,?,?,?)', (i, key, var, 'Monthly'))
+        for m, v in enumerate(vals):
+            c.execute('INSERT INTO ReportData VALUES (?,?,?)', (m + 1, i, v))
+    con.commit()
+    con.close()
+
+
+class AnnualTests(unittest.TestCase):
+    def test_monthly_energy_scaled_to_building(self):
+        sql = os.path.join(tempfile.mkdtemp(), 'annual.sql')
+        kwh = results.J_PER_KWH
+        make_annual_sql(sql, {
+            (results.V_CLG_E, 'G_S IDEAL LOADS'): [kwh] * 12,
+            (results.V_CLG_E, 'M_S IDEAL LOADS'): [2 * kwh] * 12,
+            (results.V_LIGHTS_E, 'M_S LIGHTS'): [10 * kwh] * 12,
+            (results.V_EQUIP_E, 'G_S EQUIPMENT'): [5 * kwh] * 12,
+            (results.V_SA_FLOW, 'M_S IDEAL LOADS'): [0.5] * 12,
+        })
+        model = {'zones': [{'name': 'G_S', 'scale': 1}, {'name': 'M_S', 'scale': 3}], 'design_day_env_names': {}}
+        a = results.parse_annual(sql, model)
+        self.assertAlmostEqual(a['cooling_kwh'][0], 1 + 2 * 3)      # middle floor counted N-2 times
+        self.assertAlmostEqual(a['lighting_kwh'][5], 30)
+        self.assertAlmostEqual(a['equipment_kwh'][11], 5)
+        self.assertAlmostEqual(a['supply_air_m3s'][0], 1.5)
+        self.assertEqual(a['heating_kwh'], [0.0] * 12)
+        self.assertEqual(sum(a['hours']), 8760)
+
+
 class ResultsTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

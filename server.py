@@ -4,7 +4,8 @@ standard library only, so the tool runs with just Python + EnergyPlus.
     python server.py                 -> http://localhost:3100 (opens your browser)
     python server.py --port 8080 --no-browser
 
-Environment: ENERGYPLUS_EXE, LOADS_MAX_CONCURRENT (2), LOADS_EPLUS_TIMEOUT (300 s).
+Environment: ENERGYPLUS_EXE, LOADS_MAX_CONCURRENT (2), LOADS_EPLUS_TIMEOUT (300 s),
+LOADS_ANNUAL_TIMEOUT (1800 s, annual energy runs).
 EnergyPlus runs use the same Python that started this server.
 """
 import argparse
@@ -27,6 +28,7 @@ import run_scenario  # noqa: E402
 
 MAX_CONCURRENT = int(os.environ.get('LOADS_MAX_CONCURRENT', '2'))
 TIMEOUT_S = int(os.environ.get('LOADS_EPLUS_TIMEOUT', '300')) + 30
+ANNUAL_TIMEOUT_S = int(os.environ.get('LOADS_ANNUAL_TIMEOUT', '1800')) + 30
 MAX_BODY = 64 * 1024
 MIME = {'.js': 'application/javascript', '.css': 'text/css', '.html': 'text/html; charset=utf-8',
         '.json': 'application/json', '.svg': 'image/svg+xml'}
@@ -86,7 +88,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(413, {'ok': False, 'code': 'bad_input', 'error': 'Request too large'})
         raw = self.rfile.read(n)
         try:
-            json.loads(raw or b'null')
+            body = json.loads(raw or b'null')
         except ValueError:
             return self._json(400, {'ok': False, 'code': 'bad_input', 'error': 'Body must be JSON'})
         if not _slots.acquire(blocking=False):
@@ -96,8 +98,9 @@ class Handler(BaseHTTPRequestHandler):
             print('EnergyPlus run started', flush=True)
             t0 = time.time()
             try:
+                annual = isinstance(body, dict) and bool(body.get('annual'))
                 p = subprocess.run([sys.executable, RUNNER, '-', '--include-idf'], input=raw,
-                                   capture_output=True, timeout=TIMEOUT_S)
+                                   capture_output=True, timeout=ANNUAL_TIMEOUT_S if annual else TIMEOUT_S)
                 payload = json.loads(p.stdout.decode('utf-8', 'replace'))
             except subprocess.TimeoutExpired:
                 payload = {'ok': False, 'code': 'timeout', 'error': 'EnergyPlus timed out'}

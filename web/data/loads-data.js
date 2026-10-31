@@ -2082,6 +2082,12 @@ var LOADS_DATA = {
     "unit": "h",
     "source": "No standard value: start-up lead time is an operating choice (optimal start, pre-event pre-cooling). 0 = systems and ventilation start when people arrive; set to the building's start-up sequence",
     "verify": true
+   },
+   "occ_days_per_week": {
+    "value": 7,
+    "unit": "days",
+    "source": "No standard value: set the building's occupied days per week (e.g. 5 for a weekday-only office). 7 = every day occupied, as the design-day calculation assumes. Affects annual energy only; the design days are unchanged",
+    "verify": true
    }
   },
   "envelope_by_climate_zone": {
@@ -2978,6 +2984,12 @@ var LOADS_DATA = {
    "unit": "h",
    "min": 1,
    "max": 24,
+   "int": true
+  },
+  "occ_days_per_week": {
+   "unit": "days",
+   "min": 1,
+   "max": 7,
    "int": true
   },
   "t_heat_c": {

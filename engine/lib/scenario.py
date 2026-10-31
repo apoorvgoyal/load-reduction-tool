@@ -33,6 +33,7 @@ FIELDS = {
     'unoccupied_internal_fraction': {'unit': '-', 'min': 0, 'max': 1},
     'occ_start_h':                  {'unit': 'h', 'min': 0, 'max': 23, 'int': True},
     'occ_hours':                    {'unit': 'h', 'min': 1, 'max': 24, 'int': True},
+    'occ_days_per_week':            {'unit': 'days', 'min': 1, 'max': 7, 'int': True},
     't_heat_c':                     {'unit': 'C', 'min': 10, 'max': 26},
     't_cool_c':                     {'unit': 'C', 'min': 20, 'max': 32},
     'setback_heat_c':               {'unit': 'C', 'min': 5, 'max': 26, 'nullable': True},

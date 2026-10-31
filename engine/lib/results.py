@@ -178,6 +178,58 @@ def _parse(con, model):
     }
 
 
+V_CLG_E = 'Zone Ideal Loads Supply Air Total Cooling Energy'
+V_HTG_E = 'Zone Ideal Loads Supply Air Total Heating Energy'
+V_LIGHTS_E = 'Lights Electricity Energy'
+V_EQUIP_E = 'Electric Equipment Electricity Energy'
+J_PER_KWH = 3.6e6
+DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+
+def parse_annual(sql_path, model):
+    """Monthly energy from an annual run (lib/idf.py build(annual=True)), whole
+    building with the middle floor scaled as for peaks.
+
+    Returns kWh per month for the ideal-loads cooling and heating delivered
+    (thermal, at the coil, including outdoor air net of heat recovery),
+    lighting and equipment electricity, plus the monthly mean supply airflow
+    (m3/s) so fan energy can be estimated from a specific fan power."""
+    scale = {z['name'].upper(): z['scale'] for z in model['zones']}
+    con = sqlite3.connect(sql_path)
+    try:
+        tcols = _cols(con, 'Time')
+        warm = 'AND (t.WarmupFlag IS NULL OR t.WarmupFlag = 0)' if 'WarmupFlag' in tcols else ''
+        design = set(model['design_day_env_names'])
+        rows = con.execute(
+            'SELECT e.EnvironmentName, t.Month, d.Name, d.KeyValue, r.Value FROM ReportData r '
+            'JOIN ReportDataDictionary d ON r.ReportDataDictionaryIndex = d.ReportDataDictionaryIndex '
+            'JOIN Time t ON r.TimeIndex = t.TimeIndex '
+            'JOIN EnvironmentPeriods e ON t.EnvironmentPeriodIndex = e.EnvironmentPeriodIndex '
+            "WHERE d.ReportingFrequency = 'Monthly' " + warm).fetchall()
+    finally:
+        con.close()
+    out = {k: [0.0] * 12 for k in ('cooling_kwh', 'heating_kwh', 'lighting_kwh', 'equipment_kwh', 'supply_air_m3s')}
+    names = {V_CLG_E: 'cooling_kwh', V_HTG_E: 'heating_kwh', V_LIGHTS_E: 'lighting_kwh', V_EQUIP_E: 'equipment_kwh',
+             V_SA_FLOW: 'supply_air_m3s'}
+    seen = set()
+    for env, month, name, key, val in rows:
+        if (env or '').upper() in design or name not in names or not month:
+            continue
+        zone = (key or '').upper()
+        for suffix in (' IDEAL LOADS', ' LIGHTS', ' EQUIPMENT'):
+            if zone.endswith(suffix):
+                zone = zone[:-len(suffix)]
+        if zone not in scale:
+            continue
+        k = names[name]
+        out[k][int(month) - 1] += val * scale[zone] / (1.0 if k == 'supply_air_m3s' else J_PER_KWH)
+        seen.add(k)
+    if 'cooling_kwh' not in seen and 'heating_kwh' not in seen:
+        raise ValueError('annual run produced no monthly energy outputs')
+    out['hours'] = [d * 24 for d in DAYS_IN_MONTH]
+    return out
+
+
 def hourly(vals, steps, n):
     """Mean over each window of n consecutive timesteps, keyed by the window's
     last timestep. Windows shorter than n (start of the day) are skipped unless

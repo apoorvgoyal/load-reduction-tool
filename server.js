@@ -9,6 +9,7 @@
 //   LOADS_PYTHON          Python 3 interpreter (default python3)
 //   LOADS_MAX_CONCURRENT  simultaneous EnergyPlus runs (default 2)
 //   LOADS_EPLUS_TIMEOUT   seconds per run (default 300)
+//   LOADS_ANNUAL_TIMEOUT  seconds per annual energy run (default 1800)
 'use strict';
 const http = require('http'), fs = require('fs'), path = require('path');
 const {spawn, execFile} = require('child_process');
@@ -18,6 +19,7 @@ const WEB = path.join(__dirname, 'web');
 const PYTHON = process.env.LOADS_PYTHON || 'python3';
 const MAX_CONCURRENT = +process.env.LOADS_MAX_CONCURRENT || 2;
 const TIMEOUT_MS = (+process.env.LOADS_EPLUS_TIMEOUT || 300) * 1000 + 30000;
+const ANNUAL_TIMEOUT_MS = (+process.env.LOADS_ANNUAL_TIMEOUT || 1800) * 1000 + 30000;
 const MAX_BODY = 64 * 1024;
 const MIME = {html: 'text/html; charset=utf-8', js: 'application/javascript', css: 'text/css',
   json: 'application/json', svg: 'image/svg+xml', png: 'image/png'};
@@ -47,7 +49,9 @@ function runScenario(req, res) {
   req.on('data', c => { if (tooBig) return; body += c; if (body.length > MAX_BODY) { tooBig = true; body = ''; } });
   req.on('end', () => {
     if (tooBig) return json(res, 413, {ok: false, code: 'bad_input', error: 'Request too large'});
-    try { JSON.parse(body); } catch (e) { return json(res, 400, {ok: false, code: 'bad_input', error: 'Body must be JSON'}); }
+    let parsed;
+    try { parsed = JSON.parse(body); } catch (e) { return json(res, 400, {ok: false, code: 'bad_input', error: 'Body must be JSON'}); }
+    const annual = !!(parsed && typeof parsed === 'object' && parsed.annual);
     if (active >= MAX_CONCURRENT) {
       return json(res, 429, {ok: false, code: 'busy', error: 'EnergyPlus is busy with other runs. Try again shortly.'});
     }
@@ -55,7 +59,7 @@ function runScenario(req, res) {
     const child = spawn(PYTHON, [path.join(__dirname, 'engine', 'run_scenario.py'), '-', '--include-idf'],
       {env: process.env});
     let out = '', err = '';
-    const timer = setTimeout(() => child.kill('SIGKILL'), TIMEOUT_MS);
+    const timer = setTimeout(() => child.kill('SIGKILL'), annual ? ANNUAL_TIMEOUT_MS : TIMEOUT_MS);
     child.stdout.on('data', d => { out += d; });
     child.stderr.on('data', d => { err += d; });
     child.on('error', e => { err += e.message; });

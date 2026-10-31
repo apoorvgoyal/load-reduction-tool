@@ -113,6 +113,35 @@ class GeometryTests(unittest.TestCase):
         self.assertRegex(text, r'Timestep,\n\s+%d;' % idf.TIMESTEPS_PER_HOUR)
         self.assertEqual(model['timesteps_per_hour'], idf.TIMESTEPS_PER_HOUR)
 
+    def test_weekdays_only_schedules(self):
+        _, text, _ = _build(occ_days_per_week=5, setup_cool_c=29.0)
+        occ = self._schedule(text, 'OCC_SCH')
+        i = occ.index('For: Weekdays')
+        self.assertEqual(occ[i + 1:i + 7], ['Until: 08:00', '0', 'Until: 18:00', '1', 'Until: 24:00', '0'])
+        self.assertEqual(occ[i + 7:i + 10], ['For: AllOtherDays', 'Until: 24:00', '0'])
+        clg = self._schedule(text, 'CLG_SP')
+        self.assertEqual(clg[clg.index('For: AllOtherDays') + 1:clg.index('For: AllOtherDays') + 3], ['Until: 24:00', '29'])
+        # Design days keep the occupied profile, so peaks don't depend on the week.
+        self.assertEqual(occ[:3], ['For: SummerDesignDay', 'Until: 08:00', '0'])
+        self.assertEqual(idf.occupied_day_types(6), 'Weekdays Saturday')
+        self.assertEqual(idf.occupied_day_types(3), 'Monday Tuesday Wednesday')
+
+    def test_seven_day_week_matches_design_day_model(self):
+        _, a, _ = _build()
+        _, b, _ = _build(occ_days_per_week=7)
+        self.assertEqual(a, b)
+
+    def test_annual_run_period_and_monthly_outputs(self):
+        ddy = weather.parse_ddy(os.path.join(WEATHER, STEM + '.ddy'))
+        stat = weather.parse_stat(os.path.join(WEATHER, STEM + '.stat'))
+        sc, _ = scenario.resolve({'type': 'office', 'station': 'chicago', 'gfa_m2': 10000, 'n_floors': 4}, stat['climate_zone'])
+        text, model = idf.build(sc, ddy, stat, annual=True)
+        self.assertIn('RunPeriod,', text)
+        self.assertRegex(text, r'Run Simulation for Weather File Run Periods')
+        self.assertIn('Lights Electricity Energy', text)
+        self.assertNotIn('Timestep;', text.split('Output:Variable')[-1])
+        self.assertTrue(model['annual'])
+
     def test_infiltration_total_matches_ach(self):
         sc, _, model = _build(infiltration_ach=0.3)
         q = sum(z['infiltration_m3s'] * z['scale'] for z in model['zones'])
@@ -232,12 +261,14 @@ class IddValidationTests(unittest.TestCase):
             {'n_floors': 12, 'erv_sensible_eff': 0.7, 'erv_latent_eff': 0.6, 'thermal_mass': False,
              'setback_heat_c': 15.6, 'setup_cool_c': 29.4, 'wwr': 0.0},
             {'type': 'lab', 'hvac_start_before_occ_h': 3, 'oa_unoccupied_fraction': 0.5},
+            {'occ_days_per_week': 5, '_annual': True},
         ]
         for v in variants:
             ddy = weather.parse_ddy(os.path.join(WEATHER, STEM + '.ddy'))
             stat = weather.parse_stat(os.path.join(WEATHER, STEM + '.stat'))
             user = {'type': 'office', 'station': 'chicago', 'gfa_m2': 10000, 'n_floors': 4}
             user.update(v)
+            annual = user.pop('_annual', False)
             sc, _ = scenario.resolve(user, stat['climate_zone'])
             # Capture the writer's objects for field-name checking.
             orig = idf.IdfWriter
@@ -250,7 +281,7 @@ class IddValidationTests(unittest.TestCase):
                     captured['w'] = self
             idf.IdfWriter = Spy
             try:
-                text, _ = idf.build(sc, ddy, stat)
+                text, _ = idf.build(sc, ddy, stat, annual=annual)
             finally:
                 idf.IdfWriter = orig
             self._check_names(captured['w'].objects)
