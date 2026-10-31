@@ -145,6 +145,7 @@
     sc: null, prov: null, verify: null, defaults: null, baseline: null, ep: null, open: {}, tzLoad: 'cooling',
     tab: 'summary', bdMode: 'abs', showSources: false,
     plant: {cooling: PLANTS.cooling[0], heating: PLANTS.heating[0]}, rates: {cooling: {}, heating: {}},
+    epSens: null, epSensRunning: null, epSensError: null,
     energy: {cop: '', heatSource: 'gas', heatEff: '', sfp: '', efElec: '', efGas: ''}, annual: null, annualRunning: false, annualError: null,
     engine: null, running: false, runError: null};
 
@@ -587,42 +588,13 @@
     return h;
   }
 
-  // ── Summary: sensitivity (always shown when a model exists) ─────────────
-  function sensitivityCard() {
-    var mk = modelKeyFor(S.type, S.station), m = mk && SUR[mk];
-    var head = '<div class="card"><div class="card-head"><div><h2>Which design choices move the peak most</h2></div>' +
-      seg('tzLoad', [['cooling', 'Cooling'], ['heating', 'Heating']], S.tzLoad) + '</div>';
-    if (!m) {
-      if (mk && SUR_INDEX[mk]) { loadModel(mk); return head + '<p class="sub">Loading the trained model…</p></div>'; }
-      return head + '<p class="sub">No trained model for this building type and station, so there is no instant sensitivity.</p></div>';
-    }
-    var res = C.surrogateResult(m, S.sc);
-    if (res.incompatible) return head + '<p class="sub">The trained model is from an older version of the tool; refit it.</p></div>';
-    var g = governed(res, S.sc), heating = S.tzLoad === 'heating', ddKey = heating ? g.hKey : g.cKey;
-    var out = ddKey + '|total_w_m2';
-    if (!m.outputs[out]) return head + '</div>';
-    var failed = C.failedTest(m, S.type), notes = '';
-    if (failed) {
-      notes += '<div class="note warn">The model for this type and station missed the accuracy limit (' + fmt(failed.worst, 1) +
-        '%), so its bars are indicative: the direction and ranking are a guide, the sizes are not. Confirm a chosen option with Run EnergyPlus.</div>';
-    }
-    if (res.fixedDiffs.length) {
-      notes += '<div class="note warn">You have changed inputs the model held fixed (' + res.fixedDiffs.map(function (d) { return esc(d.input); }).join(', ') +
-        '); the bars are for the trained values of those inputs.</div>';
-    }
-    var space = D.design_space.sampled, sc0 = S.sc, def = S.defaults;
-    var base = C.predict(m, sc0).perM2[out];
-    var unit = heating ? 'MBH' : 'tons', dp = heating ? 0 : 1;
-    var conv = heating ? sc0.gfa_m2 / 1000 * C.MBH_PER_KW * sc0.heating_sizing_factor
-      : sc0.gfa_m2 / 1000 / C.KW_PER_TON * sc0.cooling_sizing_factor;
-    function at(key, v) {
-      var sc = JSON.parse(JSON.stringify(sc0));
-      if (key === 'oa_multiplier') {
-        sc.oa_per_person_ls = def.oa_per_person_ls * v; sc.oa_per_area_ls_m2 = def.oa_per_area_ls_m2 * v;
-      } else sc[key] = v;
-      return (C.predict(m, sc).perM2[out] - base) * conv;
-    }
-    var rows = [];
+  // ── Summary: sensitivity ────────────────────────────────────────────────
+  // Each input swept to the low and high end of its realistic range (the
+  // trained design space), everything else as set. Bars come from an exact
+  // EnergyPlus sweep when one has been run for this scenario, otherwise from
+  // the trained model (marked indicative where the model failed its test).
+  function sweepRanges(sc0, def) {
+    var space = D.design_space.sampled, rows = [];
     Object.keys(space).forEach(function (key) {
       var sp = space[key], lo, hi;
       if (key === 'floor_plate_m2') return;            // covered by "Floors (same GFA)"
@@ -638,18 +610,87 @@
       if (key === 't_heat_c') hi = Math.min(hi, sc0.t_cool_c - 1);
       if (key === 't_cool_c') lo = Math.max(lo, sc0.t_heat_c + 1);
       if (key === 'oa_multiplier' && !(def.oa_per_person_ls > 0) && !(def.oa_per_area_ls_m2 > 0)) return;
+      if (key === 'oa_ach' && !(def.oa_ach > 0)) return;
       if (!(hi > lo)) return;
-      var dl = at(key, lo), dh = at(key, hi);
-      rows.push({key: key, lo: lo, hi: hi, dl: dl, dh: dh, span: Math.abs(dh - dl)});
+      rows.push({key: key, lo: lo, hi: hi});
     });
+    return rows;
+  }
+
+  function sweepScenario(sc0, def, key, v) {
+    var sc = JSON.parse(JSON.stringify(sc0));
+    if (key === 'oa_multiplier') { sc.oa_per_person_ls = def.oa_per_person_ls * v; sc.oa_per_area_ls_m2 = def.oa_per_area_ls_m2 * v; }
+    else sc[key] = (D.fields[key] || {}).int ? Math.round(v) : v;
+    return sc;
+  }
+
+  // Governing peak (W) for the selected percentiles from a design-day total map.
+  function govFromTotals(t, heating) {
+    if (heating) return t['htg_' + S.heatPct];
+    var a = t['clg_db_' + S.coolPct], b = t['clg_dp_' + S.coolPct];
+    return Math.max(a || 0, b || 0);
+  }
+
+  function sensitivityCard() {
+    var mk = modelKeyFor(S.type, S.station), m = mk && SUR[mk], heating = S.tzLoad === 'heating';
+    var engineOn = S.engine && S.engine.available, hash = scenarioHash(S.sc), sc0 = S.sc, def = S.defaults;
+    var ep = S.epSens && S.epSens.hash === hash && S.epSens.done ? S.epSens : null;
+    var head = '<div class="card"><div class="card-head"><div><h2>Which design choices move the peak most</h2></div>' +
+      seg('tzLoad', [['cooling', 'Cooling'], ['heating', 'Heating']], S.tzLoad) + '</div>';
+    var unit = heating ? 'MBH' : 'tons', dp = heating ? 0 : 1;
+    var conv = heating ? sc0.gfa_m2 / 1000 * C.MBH_PER_KW * sc0.heating_sizing_factor
+      : sc0.gfa_m2 / 1000 / C.KW_PER_TON * sc0.cooling_sizing_factor;
+    var rows = sweepRanges(sc0, def), notes = '', source;
+    if (ep) {
+      var b0 = govFromTotals(ep.base, heating);
+      rows = rows.filter(function (r) { return ep.runs[r.key]; }).map(function (r) {
+        var x = ep.runs[r.key];
+        return {key: r.key, lo: r.lo, hi: r.hi, dl: (govFromTotals(x.lo, heating) - b0) / sc0.gfa_m2 * conv,
+          dh: (govFromTotals(x.hi, heating) - b0) / sc0.gfa_m2 * conv};
+      });
+      source = '<span class="badge ep">EnergyPlus sweep</span>';
+    } else if (m) {
+      var res = C.surrogateResult(m, sc0);
+      if (res.incompatible) return head + '<p class="sub">The trained model is from an older version of the tool; refit it.</p></div>';
+      var g = governed(res, sc0), out = (heating ? g.hKey : g.cKey) + '|total_w_m2';
+      if (!m.outputs[out]) return head + '</div>';
+      var failed = C.failedTest(m, S.type);
+      if (failed) {
+        notes += '<div class="note warn">The model for this type and station missed the accuracy limit (' + fmt(failed.worst, 1) +
+          '%), so these bars are indicative: the direction and ranking are a guide, the sizes are not. Run the exact sweep below for EnergyPlus figures.</div>';
+      }
+      if (res.fixedDiffs.length) {
+        notes += '<div class="note warn">You have changed inputs the model held fixed (' + res.fixedDiffs.map(function (d) { return esc(d.input); }).join(', ') +
+          '); the bars are for the trained values of those inputs. Run the exact sweep below for EnergyPlus figures.</div>';
+      }
+      var base = C.predict(m, sc0).perM2[out];
+      rows = rows.map(function (r) {
+        var at = function (v) { return (C.predict(m, sweepScenario(sc0, def, r.key, v)).perM2[out] - base) * conv; };
+        return {key: r.key, lo: r.lo, hi: r.hi, dl: at(r.lo), dh: at(r.hi)};
+      });
+      source = '<span class="badge sur">' + (failed ? 'Indicative estimate' : 'Instant estimate') + '</span>';
+    } else {
+      if (mk && SUR_INDEX[mk]) { loadModel(mk); return head + '<p class="sub">Loading the trained model…</p></div>'; }
+      rows = [];
+    }
+    var nRuns = 1 + 2 * sweepRanges(sc0, def).length;
+    var sweepBtn = '<div class="actions"><button class="btn" type="button" id="b-epsens"' + (engineOn && !S.epSensRunning ? '' : ' disabled') + '>' +
+      (S.epSensRunning ? 'Running EnergyPlus sweep… ' + S.epSensRunning.done + ' of ' + S.epSensRunning.total :
+        (ep ? 'Re-run exact sweep' : 'Run exact sweep in EnergyPlus (' + nRuns + ' runs)')) + '</button></div>' +
+      (S.epSensError ? '<div class="note bad">' + esc(S.epSensError) + '</div>' : '') +
+      (!engineOn ? '<p class="sub" style="margin-top:6px">The exact sweep needs EnergyPlus (python server.py on a machine with EnergyPlus).</p>' : '');
+    if (!rows.length) {
+      return head + '<p class="sub">No trained model for this building type and station, so there is no instant sensitivity. ' +
+        'Run the exact sweep to get it from EnergyPlus.</p>' + sweepBtn + '</div>';
+    }
+    rows.forEach(function (r) { r.span = Math.abs(r.dh - r.dl); });
     // Inputs with no effect (e.g. lighting on the heating design day) are left out.
     var small = heating ? 0.5 : 0.05;
-    rows = rows.filter(function (r) { return r.span >= small; })
-      .sort(function (a, b) { return b.span - a.span; }).slice(0, 10);
+    rows = rows.filter(function (r) { return r.span >= small; }).sort(function (a, b) { return b.span - a.span; }).slice(0, 10);
     var mx = Math.max.apply(null, rows.map(function (r) { return Math.max(Math.abs(r.dl), Math.abs(r.dh)); })) || 1;
     var load = heating ? 'heating' : 'cooling';
-    var h = head + '<p class="sub">Each row tries one input at the low and high end of its realistic range, everything else as you have ' +
-      'set it. Longest bars = biggest levers. <span class="good">Green</span>: peak ' + load + ' goes down; ' +
+    var h = head + '<p class="sub">' + source + ' Each row tries one input at the low and high end of its realistic range, everything ' +
+      'else as you have set it. Longest bars = biggest levers. <span class="good">Green</span>: peak ' + load + ' goes down; ' +
       '<span class="bad">red</span>: it goes up.' +
       (heating ? ' The heating design day has no sun and no people, lighting or equipment, so those inputs do not appear.' : '') +
       '</p>' + notes + '<div class="tz">';
@@ -669,7 +710,54 @@
         '<div class="bar-wrap"><div class="axis"></div>' + bar(r.dl) + bar(r.dh) + '</div>' +
         '<div class="tz-meta">' + effect(r.lo, r.dl) + ' &nbsp;·&nbsp; ' + effect(r.hi, r.dh) + '</div></div>';
     });
-    return h + '</div></div>';
+    return h + '</div>' + (ep ? '' : sweepBtn) + '</div>';
+  }
+
+  // Exact sensitivity: the base scenario plus each input at its low and high
+  // value, run through EnergyPlus two at a time (the server's limit).
+  function runEpSweep() {
+    var sc0 = JSON.parse(JSON.stringify(S.sc)), def = S.defaults, hash = scenarioHash(sc0);
+    var jobs = [{key: null, sc: sc0}];
+    sweepRanges(sc0, def).forEach(function (r) {
+      jobs.push({key: r.key, side: 'lo', sc: sweepScenario(sc0, def, r.key, r.lo)});
+      jobs.push({key: r.key, side: 'hi', sc: sweepScenario(sc0, def, r.key, r.hi)});
+    });
+    var out = {hash: hash, base: null, runs: {}, done: false}, next = 0, active = 0, failed = null;
+    S.epSens = out; S.epSensError = null; S.epSensRunning = {done: 0, total: jobs.length}; render();
+    function totals(run) {
+      var t = {};
+      Object.keys(run.design_days).forEach(function (k) { t[k] = run.design_days[k].block.total_w; });
+      return t;
+    }
+    function launch() {
+      while (active < 2 && next < jobs.length && !failed) {
+        (function (job) {
+          active++;
+          var body = engineInput(job.sc);
+          fetch('api/run', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+            .then(function (r) { return r.json().then(function (j) { return {status: r.status, run: j}; }); })
+            .then(function (x) {
+              active--;
+              if (x.status === 429) { jobs.push(job); setTimeout(finish, 1500); return; }   // server busy: retry shortly
+              if (!x.run.ok) failed = x.run.error || 'EnergyPlus run failed';
+              else if (job.key === null) out.base = totals(x.run);
+              else (out.runs[job.key] = out.runs[job.key] || {})[job.side] = totals(x.run);
+              S.epSensRunning.done++;
+              finish();
+            })
+            .catch(function (e) { active--; failed = 'Could not reach the EnergyPlus service: ' + e.message; finish(); });
+        })(jobs[next++]);
+      }
+    }
+    function finish() {
+      if (failed && active === 0) { S.epSensRunning = null; S.epSensError = 'Sweep stopped: ' + failed; S.epSens = null; render(); return; }
+      if (next >= jobs.length && active === 0) {
+        Object.keys(out.runs).forEach(function (k) { if (!out.runs[k].lo || !out.runs[k].hi) delete out.runs[k]; });
+        out.done = true; S.epSensRunning = null; render(); return;
+      }
+      render(); launch();
+    }
+    launch();
   }
 
   // Display a swept input value in everyday units.
@@ -1122,6 +1210,7 @@
     if (t.id === 'b-reset') { S.sc = null; S.czOverride = null; resetScenario(); renderInputs(); render(); }
     else if (t.id === 'b-run') runEnergyPlus();
     else if (t.id === 'b-annual') runAnnual();
+    else if (t.id === 'b-epsens') runEpSweep();
     else if (t.id === 'b-base') {
       S.baseline = {sc: JSON.parse(JSON.stringify(S.sc)), ep: S.ep && S.ep.hash === scenarioHash(S.sc) ? S.ep : null};
       render();
