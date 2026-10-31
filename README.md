@@ -35,6 +35,28 @@ It is independent of the Total Carbon Tool: its own server, its own page, no sha
 
 The surrogate is only used when it passed its independent test against fresh EnergyPlus runs (see "Automatic testing against EnergyPlus"). Where a building type × station model missed the limit, the page shows no estimate and asks for an EnergyPlus run, giving the model's tested error. It is also only used when the scenario is inside what it was trained on. If any input it held fixed during training has changed (for example supply air temperature or occupied hours), the page asks for an EnergyPlus run. If a varied input is outside its trained range, the page shows an extrapolation warning.
 
+## What the page shows
+
+- **Summary tab**
+  - Headline block peaks (cooling tons, heating MBH) for the selected design condition, with change against a saved baseline.
+  - Bar charts of every design day in the weather file: cooling 0.4/1/2% on the dry-bulb and dew-point days, heating 99.6/99%.
+  - **Where the peak load comes from**: each peak split into people, lighting, equipment, window solar and conduction, walls, roof, ground floor, infiltration, internal mass, ventilation and heat recovery, as absolute values or % of the peak. It sums exactly to the peak (method under "What the model is").
+  - **Which design choices move the peak most**: each input swept to the low and high end of its realistic range. The bars come from the trained model when one exists (marked indicative where it failed its test). **Run exact sweep in EnergyPlus** replaces them with EnergyPlus results: the scenario plus two runs per input, about a minute on a PC.
+  - **Plant cost**: capacity × your own $/ton and $/MBH for the plant type you choose. No built-in cost data.
+  - **Annual energy and carbon**: see below.
+- **Detailed data tab**: SHR, supply air, ventilation load, the comparison table, EnergyPlus run detail (profiles, component table, zone sizing, IDF and JSON downloads), design conditions, and defaults still awaiting confirmation.
+
+### Annual energy and carbon
+
+**Run annual energy** runs the same model for a full year on the station's TMY3 weather file. The file is downloaded once from the DOE EnergyPlus weather library into `engine/weather/epw/`, which is git-ignored.
+
+- **What it reports**: monthly cooling and heating delivered at the coil (ideal loads, outdoor air net of heat recovery), lighting and equipment electricity, and supply airflow.
+- **Conversion to energy and carbon** uses only your inputs under *Energy and carbon*: cooling COP, heating source with its efficiency or COP, fan power in W per L/s, and electricity and gas carbon factors. Missing inputs are named rather than assumed.
+- **Weekly schedule**: *Occupied days per week* sets it. Unoccupied days use the unoccupied gains, outdoor air and setback/setup. Design days are unaffected.
+- **Not included**: domestic hot water, elevators and process loads.
+- **No economizer is modelled.** EnergyPlus's ideal-loads economizer does not modulate outdoor air and added spurious heating in testing, so annual cooling in mild weather is an upper bound.
+- **Fans**: fan energy follows the airflow the loads need, as a variable-volume fan would. A constant-volume fan uses more.
+
 ## Quick start
 
 ```bash
