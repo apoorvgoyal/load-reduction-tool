@@ -76,6 +76,7 @@
     {title: 'Schedule and controls', open: false, fields: [
       ['occ_start_h', 'Occupied from (hour)', 'h', 1],
       ['occ_hours', 'Occupied hours per day', 'h', 1],
+      ['occ_days_per_week', 'Occupied days per week (annual energy)', 'days', 1],
       ['hvac_start_before_occ_h', 'Systems start before occupancy', 'h', 1],
       ['oa_unoccupied_fraction', 'Outdoor air when unoccupied (fraction of design)', '-', 0.05],
       ['t_heat_c', 'Heating setpoint (occupied)', 'C', 0.5],
@@ -144,6 +145,7 @@
     sc: null, prov: null, verify: null, defaults: null, baseline: null, ep: null, open: {}, tzLoad: 'cooling',
     tab: 'summary', bdMode: 'abs', showSources: false,
     plant: {cooling: PLANTS.cooling[0], heating: PLANTS.heating[0]}, rates: {cooling: {}, heating: {}},
+    energy: {cop: '', heatSource: 'gas', heatEff: '', sfp: '', efElec: '', efGas: ''}, annual: null, annualRunning: false, annualError: null,
     engine: null, running: false, runError: null};
 
   function stationById(id) {
@@ -176,7 +178,7 @@
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify({type: S.type, station: S.station, czOverride: S.czOverride,
         coolPct: S.coolPct, heatPct: S.heatPct, sc: S.sc, baseline: S.baseline, tab: S.tab, bdMode: S.bdMode,
-        showSources: S.showSources, plant: S.plant, rates: S.rates}));
+        showSources: S.showSources, plant: S.plant, rates: S.rates, energy: S.energy, annual: S.annual}));
     } catch (e) { /* storage unavailable: state just isn't remembered */ }
   }
 
@@ -190,6 +192,8 @@
       S.showSources = !!s.showSources;
       if (s.plant) S.plant = s.plant;
       if (s.rates) S.rates = {cooling: s.rates.cooling || {}, heating: s.rates.heating || {}};
+      if (s.energy) Object.keys(S.energy).forEach(function (k) { if (s.energy[k] !== undefined) S.energy[k] = s.energy[k]; });
+      S.annual = s.annual || null;
       var d = C.defaults(D, S.type, s.sc.climate_zone);
       S.prov = d.provenance; S.verify = d.verify; S.defaults = d.scenario;
       S.sc = s.sc; S.baseline = s.baseline || null;
@@ -351,6 +355,20 @@
       }
       h += '</details>';
     });
+    var E = S.energy, heatEffLabel = E.heatSource === 'gas' ? 'Boiler efficiency (fraction, e.g. 0.9)' :
+      (E.heatSource === 'heatpump' ? 'Heat pump heating COP' : '');
+    h += '<details class="grp" data-g="Energy and carbon"' + (S.open['Energy and carbon'] ? ' open' : '') + '><summary>Energy and carbon</summary>' +
+      '<p class="sub">Used to turn the annual run\'s heating and cooling into electricity and gas, and those into carbon. ' +
+      'Your values: the tool has no built-in efficiencies or emission factors.</p>' +
+      energyField('cop', 'Cooling plant COP (kW cooling per kW electric)', 0.1) +
+      '<div class="field"><label for="f-e-heatSource">Heating source</label><select id="f-e-heatSource">' +
+      [['gas', 'Gas boiler'], ['electric', 'Electric resistance'], ['heatpump', 'Heat pump']].map(function (o) {
+        return '<option value="' + o[0] + '"' + (E.heatSource === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+      }).join('') + '</select></div>' +
+      (heatEffLabel ? energyField('heatEff', heatEffLabel, 0.01) : '') +
+      energyField('sfp', 'Fan power (W per L/s of supply air)', 0.1) +
+      energyField('efElec', 'Electricity carbon factor (kg CO₂e per kWh)', 0.001) +
+      (E.heatSource === 'gas' ? energyField('efGas', 'Gas carbon factor (kg CO₂e per therm)', 0.01) : '') + '</details>';
     h += '<details class="grp" data-g="Plant cost"' + (S.open['Plant cost'] ? ' open' : '') + '><summary>Plant cost</summary>' +
       '<p class="sub">Your installed-cost rates per plant type. The tool has no built-in cost data.</p>';
     ['cooling', 'heating'].forEach(function (kind) {
@@ -365,6 +383,11 @@
     h += '</details>';
     h += '<div class="actions"><button class="btn" id="b-reset" type="button">Reset to defaults</button></div>';
     document.getElementById('inputs').innerHTML = h;
+  }
+
+  function energyField(k, label, step) {
+    return '<div class="field"><label for="f-e-' + k + '">' + esc(label) + '</label><input id="f-e-' + k +
+      '" type="number" min="0" step="' + step + '" value="' + esc(S.energy[k]) + '"></div>';
   }
 
   // ── Rendering: shared pieces ────────────────────────────────────────────
@@ -703,6 +726,140 @@
     return h;
   }
 
+  // ── Summary: annual energy and carbon ───────────────────────────────────
+  var KWH_PER_THERM = 29.3071;          // 100,000 Btu
+  var KBTU_PER_KWH = 3.412142;
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  // Monthly end uses from an annual run, converted with the user's factors.
+  // Anything the user hasn't entered stays null and is shown as missing.
+  function annualFigures(a) {
+    var E = S.energy, num = function (v) { v = parseFloat(v); return isNaN(v) || v <= 0 ? null : v; };
+    var cop = num(E.cop), eff = num(E.heatEff), sfp = num(E.sfp), efE = num(E.efElec), efG = num(E.efGas);
+    var m = MONTHS.map(function (_, i) {
+      var fan = sfp != null ? sfp * a.supply_air_m3s[i] * a.hours[i] : null;     // W per L/s x m3/s x h = kWh
+      var heatElec = E.heatSource === 'electric' ? a.heating_kwh[i] : (E.heatSource === 'heatpump' && eff ? a.heating_kwh[i] / eff : null);
+      var gas = E.heatSource === 'gas' && eff ? a.heating_kwh[i] / eff : 0;
+      return {cooling_th: a.cooling_kwh[i], heating_th: a.heating_kwh[i], lighting: a.lighting_kwh[i], equipment: a.equipment_kwh[i],
+        fan: fan, cooling_el: cop ? a.cooling_kwh[i] / cop : null, heating_el: E.heatSource === 'gas' ? 0 : heatElec,
+        gas_kwh: E.heatSource === 'gas' ? (eff ? gas : null) : 0};
+    });
+    function sum(k) {
+      var t = 0;
+      for (var i = 0; i < 12; i++) { if (m[i][k] == null) return null; t += m[i][k]; }
+      return t;
+    }
+    var t = {cooling_th: sum('cooling_th'), heating_th: sum('heating_th'), lighting: sum('lighting'), equipment: sum('equipment'),
+      fan: sum('fan'), cooling_el: sum('cooling_el'), heating_el: sum('heating_el'), gas_kwh: sum('gas_kwh')};
+    var parts = [t.cooling_el, t.heating_el, t.lighting, t.equipment, t.fan];
+    t.elec = parts.some(function (v) { return v == null; }) ? null : parts.reduce(function (x, y) { return x + y; }, 0);
+    t.therms = t.gas_kwh == null ? null : t.gas_kwh / KWH_PER_THERM;
+    t.co2 = (t.elec == null || efE == null || (t.therms > 0 && efG == null)) ? null : t.elec * efE + (t.therms || 0) * (efG || 0);
+    t.missing = [];
+    if (cop == null) t.missing.push('cooling COP');
+    if (E.heatSource !== 'electric' && eff == null) t.missing.push(E.heatSource === 'gas' ? 'boiler efficiency' : 'heat pump COP');
+    if (sfp == null) t.missing.push('fan power');
+    if (efE == null) t.missing.push('electricity carbon factor');
+    if (E.heatSource === 'gas' && efG == null) t.missing.push('gas carbon factor');
+    return {months: m, total: t};
+  }
+
+  function stackedBars(months, series, unit) {
+    var W = 640, H = 230, left = 52, right = 12, top = 16, bottom = 40;
+    var totals = months.map(function (mo) { return series.reduce(function (s0, sr) { return s0 + Math.max(0, mo[sr.key] || 0); }, 0); });
+    var mx = Math.max.apply(null, totals.concat([1e-9]));
+    var step = Math.pow(10, Math.floor(Math.log(mx) / Math.LN10)), tick = step, nice = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < nice.length; i++) { tick = nice[i] * step; if (mx * 1.08 / tick <= 5) break; }
+    var yMax = Math.ceil(mx * 1.08 / tick) * tick, Y = function (v) { return top + (1 - v / yMax) * (H - top - bottom); };
+    var bw = (W - left - right) / 12, out = '';
+    for (var tt = 0; tt <= yMax + 1e-9; tt += tick) {
+      out += '<line x1="' + left + '" x2="' + (W - right) + '" y1="' + Y(tt) + '" y2="' + Y(tt) + '" class="grid"/>' +
+        '<text x="' + (left - 6) + '" y="' + (Y(tt) + 3.5) + '" text-anchor="end">' + fmt(tt / 1000, tt % 1000 ? 1 : 0) + '</text>';
+    }
+    months.forEach(function (mo, mi) {
+      var y0 = Y(0), x = left + mi * bw + bw * 0.18;
+      series.forEach(function (sr) {
+        var v = Math.max(0, mo[sr.key] || 0), hgt = Y(0) - Y(v);
+        if (hgt <= 0) return;
+        out += '<rect x="' + x + '" y="' + (y0 - hgt) + '" width="' + bw * 0.64 + '" height="' + hgt + '" fill="' + sr.color + '"><title>' +
+          esc(MONTHS[mi] + ' · ' + sr.label + ': ' + fmt(v, 0) + ' kWh') + '</title></rect>';
+        y0 -= hgt;
+      });
+      out += '<text x="' + (x + bw * 0.32) + '" y="' + (H - bottom + 14) + '" text-anchor="middle">' + MONTHS[mi] + '</text>';
+    });
+    out += '<line x1="' + left + '" x2="' + (W - right) + '" y1="' + Y(0) + '" y2="' + Y(0) + '" class="axis"/>';
+    var legend = '<div class="legend">' + series.map(function (sr) {
+      return '<span><i style="background:' + sr.color + '"></i>' + esc(sr.label) + '</span>';
+    }).join('') + '</div>';
+    return '<div class="chart bars"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Monthly energy by end use">' +
+      '<text x="' + left + '" y="10" class="title">' + esc(unit) + '</text>' + out + '</svg></div>' + legend;
+  }
+
+  function annualCard() {
+    var engineOn = S.engine && S.engine.available, hash = scenarioHash(S.sc);
+    var h = '<div class="card"><div class="card-head"><div><h2>Annual energy and carbon</h2><p class="sub">A full-year EnergyPlus run on ' +
+      'the station\'s typical-year (TMY3) weather: heating, cooling, fans, lighting and equipment. Not included: hot water, ' +
+      'elevators, process loads.</p></div></div>';
+    var run = S.annual && S.annual.hash === hash ? S.annual.run : null;
+    if (!run) {
+      if (S.annual) h += '<div class="note info">Inputs have changed since the last annual run.</div>';
+      if (S.annualError) h += '<div class="note bad">' + esc(S.annualError) + '</div>';
+      h += '<div class="actions"><button class="btn primary" type="button" id="b-annual"' + (engineOn && !S.annualRunning ? '' : ' disabled') + '>' +
+        (S.annualRunning ? 'Running a full year in EnergyPlus…' : 'Run annual energy') + '</button></div>' +
+        '<p class="sub" style="margin-top:8px">' + (engineOn ? 'Typically a minute or two; the weather file is downloaded on first use.' :
+          'Needs EnergyPlus (start the tool with python server.py on a machine with EnergyPlus).') + '</p></div>';
+      return h;
+    }
+    var f = annualFigures(run.annual), t = f.total, ft2 = S.sc.gfa_m2 * C.FT2_PER_M2;
+    var site = (t.elec != null && t.gas_kwh != null) ? (t.elec + t.gas_kwh) * KBTU_PER_KWH / ft2 : null;
+    h += '<div class="kpis">' +
+      '<div class="kpi"><div class="kpi-label">Electricity</div><div class="kpi-value">' + (t.elec != null ? fmt(t.elec / 1000, 0) : '–') + '<span class="kpi-unit">MWh/yr</span></div>' +
+        '<div class="kpi-sec">' + (t.elec != null ? fmt(t.elec / S.sc.gfa_m2, 0) + ' kWh/m²' : 'needs ' + esc(t.missing.filter(function (x) { return x.indexOf('carbon') < 0; }).join(', '))) + '</div></div>' +
+      (S.energy.heatSource === 'gas' ? '<div class="kpi"><div class="kpi-label">Gas</div><div class="kpi-value">' + (t.therms != null ? fmt(t.therms, 0) : '–') +
+        '<span class="kpi-unit">therms/yr</span></div><div class="kpi-sec">' + (t.therms != null ? fmt(t.gas_kwh / 1000, 0) + ' MWh' : 'needs boiler efficiency') + '</div></div>' : '') +
+      '<div class="kpi"><div class="kpi-label">Site EUI</div><div class="kpi-value">' + (site != null ? fmt(site, 1) : '–') + '<span class="kpi-unit">kBtu/ft²·yr</span></div>' +
+        '<div class="kpi-sec">' + (site != null ? fmt(site / KBTU_PER_KWH * C.FT2_PER_M2, 0) + ' kWh/m²·yr' : '') + '</div></div>' +
+      '<div class="kpi"><div class="kpi-label">Operational carbon</div><div class="kpi-value">' + (t.co2 != null ? fmt(t.co2 / 1000, 0) : '–') + '<span class="kpi-unit">t CO₂e/yr</span></div>' +
+        '<div class="kpi-sec">' + (t.co2 != null ? fmt(t.co2 / S.sc.gfa_m2, 1) + ' kg/m²' : 'needs ' + esc(t.missing.join(', '))) + '</div></div></div>';
+    var siteSeries = t.elec != null && t.gas_kwh != null;
+    var series = siteSeries ? [
+      {key: 'heating_el', label: 'Heating (electric)', color: 'var(--heat)'}, {key: 'gas_kwh', label: 'Heating (gas)', color: 'var(--heat-2)'},
+      {key: 'cooling_el', label: 'Cooling', color: 'var(--cool)'}, {key: 'fan', label: 'Fans', color: 'var(--ink-4)'},
+      {key: 'lighting', label: 'Lighting', color: 'var(--warn)'}, {key: 'equipment', label: 'Equipment', color: 'var(--good)'}] : [
+      {key: 'heating_th', label: 'Heating delivered', color: 'var(--heat)'}, {key: 'cooling_th', label: 'Cooling delivered', color: 'var(--cool)'},
+      {key: 'lighting', label: 'Lighting', color: 'var(--warn)'}, {key: 'equipment', label: 'Equipment', color: 'var(--good)'}];
+    h += '<h3>Monthly ' + (siteSeries ? 'site energy' : 'loads and electricity (enter your efficiencies to convert to site energy)') + '</h3>' +
+      stackedBars(f.months, series, 'MWh');
+    var rows = [['Cooling delivered (coil)', t.cooling_th, t.cooling_el, 'electricity'],
+      ['Heating delivered (coil)', t.heating_th, S.energy.heatSource === 'gas' ? t.gas_kwh : t.heating_el, S.energy.heatSource === 'gas' ? 'gas' : 'electricity'],
+      ['Fans', null, t.fan, 'electricity'], ['Lighting', null, t.lighting, 'electricity'], ['Equipment', null, t.equipment, 'electricity']];
+    h += '<div class="scroll-x" style="margin-top:10px"><table class="t"><thead><tr><th>End use</th><th>Load (MWh)</th><th>Site energy (MWh)</th><th>Fuel</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr><td>' + r[0] + '</td><td class="num">' + (r[1] != null ? fmt(r[1] / 1000, 1) : '') + '</td><td class="num">' +
+          (r[2] != null ? fmt(r[2] / 1000, 1) : '–') + '</td><td>' + r[3] + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    h += '<p class="sub" style="margin:8px 0 0">' + esc(run.station.weather_file) + ' · ' + fmt(S.sc.occ_days_per_week, 0) + ' occupied days a week · ' +
+      fmt(run.engine.run_seconds, 0) + ' s. No economizer is modelled, so cooling in mild weather is an upper bound. ' +
+      'Typical-year weather, not a forecast for a specific year.</p>' +
+      '<div class="actions"><button class="btn" type="button" id="b-annual">Run again</button></div></div>';
+    return h;
+  }
+
+  function runAnnual() {
+    S.annualRunning = true; S.annualError = null; render();
+    var sc = JSON.parse(JSON.stringify(S.sc)), hash = scenarioHash(sc), body = engineInput(sc);
+    body.annual = true;
+    fetch('api/run', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+      .then(function (r) { return r.json(); })
+      .then(function (run) {
+        S.annualRunning = false;
+        if (!run.ok) S.annualError = 'Annual run failed: ' + (run.error || 'unknown error');
+        else { delete run.idf; S.annual = {hash: hash, run: run}; }
+        render();
+      })
+      .catch(function (e) { S.annualRunning = false; S.annualError = 'Could not reach the EnergyPlus service: ' + e.message; render(); });
+  }
+
   // ── Detailed data ───────────────────────────────────────────────────────
   function detailKpis(g, b) {
     var ft2 = g.gfa * C.FT2_PER_M2, cfm = g.supply != null ? g.supply * C.CFM_PER_M3S : null, h = '<div class="kpis">';
@@ -878,6 +1035,7 @@
       if (g) h += designDayCard(g, b) + breakdownCard(g, b);
       h += sensitivityCard();
       if (g) h += costCard(g, b);
+      h += annualCard();
     } else {
       if (g) {
         h += '<div class="card"><h2>Peak load detail</h2><p class="sub">Selected condition: cooling ' + S.coolPct + '%, heating ' + S.heatPct + '%.</p>' +
@@ -916,6 +1074,8 @@
 
   function onInput(e) {
     var t = e.target;
+    var en = t.id && t.id.match(/^f-e-(\w+)$/);
+    if (en && en[1] !== 'heatSource') { S.energy[en[1]] = t.value; renderResults(); save(); return; }
     var rate = t.id && t.id.match(/^f-rate-(cooling|heating)$/);
     if (rate) { S.rates[rate[1]][S.plant[rate[1]]] = t.value; renderResults(); save(); return; }
     var k = t.getAttribute('data-k');
@@ -946,6 +1106,7 @@
       resetScenario(); renderInputs(); render();
     } else if (t.id === 'f-cz') { S.czOverride = t.value || null; resetScenario(); renderInputs(); render(); }
     else if (t.id === 'f-sources') { S.showSources = t.checked; renderInputs(); save(); }
+    else if (t.id === 'f-e-heatSource') { S.energy.heatSource = t.value; S.energy.heatEff = ''; renderInputs(); render(); }
     else if (t.id === 'f-plant-cooling' || t.id === 'f-plant-heating') {
       S.plant[t.id === 'f-plant-cooling' ? 'cooling' : 'heating'] = t.value; renderInputs(); render();
     }
@@ -959,6 +1120,7 @@
     if (t.getAttribute('data-tab')) { S.tab = t.getAttribute('data-tab'); render(); return; }
     if (t.id === 'b-reset') { S.sc = null; S.czOverride = null; resetScenario(); renderInputs(); render(); }
     else if (t.id === 'b-run') runEnergyPlus();
+    else if (t.id === 'b-annual') runAnnual();
     else if (t.id === 'b-base') {
       S.baseline = {sc: JSON.parse(JSON.stringify(S.sc)), ep: S.ep && S.ep.hash === scenarioHash(S.sc) ? S.ep : null};
       render();
