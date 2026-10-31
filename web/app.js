@@ -839,7 +839,8 @@
           (r[2] != null ? fmt(r[2] / 1000, 1) : '–') + '</td><td>' + r[3] + '</td></tr>';
       }).join('') + '</tbody></table></div>';
     h += '<p class="sub" style="margin:8px 0 0">' + esc(run.station.weather_file) + ' · ' + fmt(S.sc.occ_days_per_week, 0) + ' occupied days a week · ' +
-      fmt(run.engine.run_seconds, 0) + ' s. No economizer is modelled, so cooling in mild weather is an upper bound. ' +
+      fmt(run.engine.run_seconds, 0) + ' s. No economizer is modelled, so cooling in mild weather is an upper bound. Fan energy follows the airflow ' +
+      'the loads need (a variable-volume fan); a constant-volume fan uses more. ' +
       'Typical-year weather, not a forecast for a specific year.</p>' +
       '<div class="actions"><button class="btn" type="button" id="b-annual">Run again</button></div></div>';
     return h;
