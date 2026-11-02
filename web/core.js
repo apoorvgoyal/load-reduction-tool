@@ -176,6 +176,190 @@
     return {source: 'energyplus', gfa: run.scenario.gfa_m2, dd: dd, groups: run.component_groups || null, run: run};
   }
 
+  // Evaluate only the named outputs (per m2) - the optimizer calls this
+  // many thousands of times, so it skips everything else.
+  function predictSome(model, sc, names) {
+    var x = features(sc), z = [], i, out = {};
+    for (i = 0; i < x.length; i++) z.push((x[i] - model.feature_mean[i]) / model.feature_std[i]);
+    var X = expand(z);
+    names.forEach(function (n) { out[n] = Math.max(0, dot(model.outputs[n].coef, X)); });
+    return out;
+  }
+
+  // ── Optimizer ─────────────────────────────────────────────────────────
+  // Find lever settings that reach a peak-reduction target.
+  //   levers   [{key, v0, lo, hi, int, cost}]   cost = user's $ per unit change (optional)
+  //   evaluate function(values) -> {clg, htg}   peak loads (W) for a {key: value} map
+  //   target   {clg: 0.2, htg: null}           fractional reductions; null = no target
+  // Returns the baseline, the three ranked options (fewest levers changed,
+  // smallest overall change, lowest cost) or, when the target can't be met,
+  // the best achievable, plus the best reduction reachable with 1, 2, ... levers.
+  // Deterministic: a fixed-seed random search, then refinement.
+  function optimize(levers, evaluate, target, opts) {
+    opts = opts || {};
+    var rnd = (function (a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })(opts.seed || 7);
+    var n = levers.length, base = {}, i;
+    levers.forEach(function (l) { base[l.key] = l.v0; });
+    var b = evaluate(base);
+    var goalC = target.clg != null ? b.clg * (1 - target.clg) : null, goalH = target.htg != null ? b.htg * (1 - target.htg) : null;
+    function snap(l, v) { v = Math.min(l.hi, Math.max(l.lo, v)); return l.int ? Math.round(v) : v; }
+    // Shortfall <= 0 means every target is met; smaller is better.
+    function score(vals) {
+      var r = evaluate(vals), s = -Infinity;
+      if (goalC != null) s = Math.max(s, (r.clg - goalC) / b.clg);
+      if (goalH != null) s = Math.max(s, (r.htg - goalH) / b.htg);
+      return {vals: vals, r: r, s: s};
+    }
+    function change(vals) {     // normalised L1 distance from the baseline
+      var d = 0; levers.forEach(function (l) { d += Math.abs(vals[l.key] - l.v0) / ((l.hi - l.lo) || 1); }); return d;
+    }
+    function cost(vals) {
+      var c = 0; levers.forEach(function (l) { if (l.cost) c += l.cost * Math.abs(vals[l.key] - l.v0); }); return c;
+    }
+    function moved(vals) {
+      return levers.filter(function (l) { return Math.abs(vals[l.key] - l.v0) > 1e-9 * Math.max(1, Math.abs(l.v0)); });
+    }
+    function copy(v) { var o = {}; Object.keys(v).forEach(function (k) { o[k] = v[k]; }); return o; }
+    // Pull each lever back toward its current value as far as the target allows.
+    function shrink(pt, order) {
+      var vals = copy(pt.vals);
+      for (var pass = 0; pass < 3; pass++) {
+        (order || levers).forEach(function (l) {
+          var far = vals[l.key], near = l.v0, trial = copy(vals);
+          trial[l.key] = near;
+          if (score(trial).s <= 0) { vals = trial; return; }
+          for (var it = 0; it < 14; it++) {
+            var mid = snap(l, (far + near) / 2);
+            trial[l.key] = mid;
+            if (score(trial).s <= 0) far = mid; else near = mid;
+            if (l.int && Math.abs(far - near) <= 1) break;
+          }
+          vals[l.key] = far;
+        });
+      }
+      return score(vals);
+    }
+    // Improve the shortfall by coordinate moves (used when the target is out of reach).
+    function climb(pt, keys) {
+      var cur = pt;
+      for (var step = 0.5; step > 0.01; step /= 2) {
+        var better = true;
+        while (better) {
+          better = false;
+          levers.forEach(function (l) {
+            if (keys && keys.indexOf(l.key) < 0) return;
+            [-1, 1].forEach(function (sg) {
+              var t = copy(cur.vals); t[l.key] = snap(l, t[l.key] + sg * step * (l.hi - l.lo));
+              var c = score(t); if (c.s < cur.s - 1e-9) { cur = c; better = true; }
+            });
+          });
+        }
+      }
+      return cur;
+    }
+    // Walk from the baseline in small steps, each time moving the lever that
+    // buys the most reduction per unit of change ('change': fraction of its
+    // range; 'cost': the user's $), until the target is met or nothing helps.
+    function greedy(keys, metric) {
+      var cur = score(copy(base)), h = 0.02;
+      for (var it = 0; it < 400 && cur.s > 0; it++) {
+        var pick = null;
+        levers.forEach(function (l) {
+          if (keys.indexOf(l.key) < 0) return;
+          [-1, 1].forEach(function (sg) {
+            var t = copy(cur.vals); t[l.key] = snap(l, t[l.key] + sg * h * (l.hi - l.lo));
+            if (t[l.key] === cur.vals[l.key]) return;
+            var c = score(t), gain = cur.s - c.s;
+            if (gain <= 1e-12) return;
+            var spend = metric === 'cost' ? (l.cost || 0) * Math.abs(t[l.key] - cur.vals[l.key]) : h;
+            var eff = spend > 0 ? gain / spend : Infinity;
+            if (!pick || eff > pick.eff) pick = {eff: eff, pt: c};
+          });
+        });
+        if (!pick) break;
+        cur = pick.pt;
+      }
+      return cur;
+    }
+    function sampleIn(keys, count) {
+      var pts = [];
+      for (var k = 0; k < count; k++) {
+        var v = copy(base);
+        levers.forEach(function (l) { if (keys.indexOf(l.key) >= 0) v[l.key] = snap(l, l.lo + rnd() * (l.hi - l.lo)); });
+        pts.push(score(v));
+      }
+      // Corners of the sub-box (each lever at an end of its range) when few levers.
+      if (keys.length <= 6) {
+        for (var m = 0; m < (1 << keys.length); m++) {
+          var c = copy(base);
+          keys.forEach(function (key, j) { var l = levers.filter(function (x) { return x.key === key; })[0]; c[key] = (m >> j) & 1 ? l.hi : l.lo; });
+          pts.push(score(c));
+        }
+      }
+      return pts;
+    }
+    var all = levers.map(function (l) { return l.key; });
+    var pts = sampleIn(all, opts.samples || 3000);
+    var best = pts.reduce(function (a, c) { return c.s < a.s ? c : a; });
+    best = climb(best);
+    var out = {baseline: b, goal: {clg: goalC, htg: goalH}, feasible: best.s <= 0};
+    // Best reduction reachable with 1, 2, ... levers (levers ranked by their own reach).
+    var single = levers.map(function (l) { return {l: l, p: climb(sampleIn([l.key], 24).reduce(function (a, c) { return c.s < a.s ? c : a; }), [l.key])}; })
+      .sort(function (a, c) { return a.p.s - c.p.s; });
+    var top = single.slice(0, Math.min(10, n)).map(function (x) { return x.l.key; });
+    function combos(arr, k) {
+      var res = [];
+      (function rec(start, acc) {
+        if (acc.length === k) { res.push(acc.slice()); return; }
+        for (var j = start; j < arr.length; j++) { acc.push(arr[j]); rec(j + 1, acc); acc.pop(); }
+      })(0, []);
+      return res;
+    }
+    out.byCount = [];
+    var fewest = null;
+    for (var k = 1; k <= Math.min(6, top.length); k++) {
+      var bestK = null, feasK = [];
+      combos(top, k).forEach(function (keys) {
+        var p = sampleIn(keys, 120).reduce(function (a, c) { return c.s < a.s ? c : a; });
+        p = climb(p, keys);
+        if (!bestK || p.s < bestK.s) bestK = p;
+        if (p.s <= 0) feasK.push(p);
+      });
+      out.byCount.push({levers: k, best: bestK.r});
+      if (!fewest && feasK.length) {
+        fewest = combos(top, k).map(function (keys) { return greedy(keys, 'change'); })
+          .filter(function (p) { return p.s <= 0; }).concat(feasK).map(function (p) { return shrink(p); })
+          .filter(function (p) { return moved(p.vals).length <= k; })
+          .sort(function (a, c) { return change(a.vals) - change(c.vals); })[0] || null;
+      }
+    }
+    if (out.feasible) {
+      var feas = pts.filter(function (p) { return p.s <= 0; }).concat([best]);
+      var g = greedy(all, 'change');
+      var smallest = feas.sort(function (a, c) { return change(a.vals) - change(c.vals); }).slice(0, 8)
+        .concat(g.s <= 0 ? [g] : [])
+        .map(function (p) { return shrink(p); }).sort(function (a, c) { return change(a.vals) - change(c.vals); })[0];
+      out.smallest = smallest;
+      out.fewest = fewest;
+      if (levers.some(function (l) { return l.cost; })) {
+        // Spend on the cheapest levers first: pull the dearest back first.
+        var order = levers.slice().sort(function (a, c) { return (c.cost || 0) - (a.cost || 0); });
+        var gc = greedy(all, 'cost');
+        out.cheapest = feas.sort(function (a, c) { return cost(a.vals) - cost(c.vals); }).slice(0, 8)
+          .concat(gc.s <= 0 ? [gc] : [])
+          .map(function (p) { return shrink(p, order); }).sort(function (a, c) { return cost(a.vals) - cost(c.vals); })[0];
+      }
+    } else {
+      out.bestAchievable = best;
+    }
+    out.describe = function (pt) {
+      return {values: pt.vals, result: pt.r, moved: moved(pt.vals).map(function (l) { return {key: l.key, from: l.v0, to: pt.vals[l.key]}; }),
+        change: change(pt.vals), cost: cost(pt.vals)};
+    };
+    return out;
+  }
+
   // Load breakdown categories, in display order (engine/lib/results.py).
   var COMPONENTS = ['people', 'lighting', 'equipment', 'window_solar', 'window_conduction', 'walls', 'roof',
     'ground_floor', 'infiltration', 'internal_mass'];
@@ -204,7 +388,7 @@
   }
 
   var api = {
-    FEATURES: FEATURES, defaults: defaults, features: features, expand: expand, predict: predict, predictFeatures: predictFeatures, failedTest: failedTest, breakdown: breakdown, COMPONENTS: COMPONENTS,
+    FEATURES: FEATURES, defaults: defaults, features: features, expand: expand, predict: predict, predictFeatures: predictFeatures, failedTest: failedTest, breakdown: breakdown, COMPONENTS: COMPONENTS, predictSome: predictSome, optimize: optimize,
     surrogateResult: surrogateResult, energyplusResult: energyplusResult, governing: governing,
     KW_PER_TON: KW_PER_TON, MBH_PER_KW: MBH_PER_KW, CFM_PER_M3S: CFM_PER_M3S, FT2_PER_M2: FT2_PER_M2
   };

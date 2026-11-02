@@ -146,6 +146,7 @@
     tab: 'summary', bdMode: 'abs', showSources: false,
     plant: {cooling: PLANTS.cooling[0], heating: PLANTS.heating[0]}, rates: {cooling: {}, heating: {}},
     epSens: null, epSensRunning: null, epSensError: null,
+    opt: {clg: '', htg: '', levers: {}, result: null, showLevers: false},
     energy: {cop: '', heatSource: 'gas', heatEff: '', sfp: '', efElec: '', efGas: ''}, annual: null, annualRunning: false, annualError: null,
     engine: null, running: false, runError: null};
 
@@ -760,6 +761,123 @@
     launch();
   }
 
+  // ── Summary: reach a target (optimizer) ─────────────────────────────────
+  // Searches the trained model for lever settings that cut the selected peaks
+  // by the user's target (web/core.js optimize). Ranges default to the trained
+  // design space and can only be narrowed, so every option stays inside it.
+  function leverValueNow(key) {
+    var sc = S.sc, def = S.defaults;
+    if (key === 'oa_multiplier') {
+      if (def.oa_per_person_ls > 0) return sc.oa_per_person_ls / def.oa_per_person_ls;
+      if (def.oa_per_area_ls_m2 > 0) return sc.oa_per_area_ls_m2 / def.oa_per_area_ls_m2;
+      return 1;
+    }
+    return sc[key];
+  }
+
+  // Program inputs (set by the client's use, not the design) start switched
+  // off; outdoor air can't go below the code rate (the type's default) unless
+  // the user lowers that limit.
+  var PROGRAM_LEVERS = ['epd_w_m2', 'm2_per_person'];
+  function codeFloor(key) {
+    if (key === 'oa_multiplier') return 1;
+    if (key === 'oa_ach') return S.defaults.oa_ach;
+    return null;
+  }
+
+  function optLevers() {
+    var o = S.opt;
+    return sweepRanges(S.sc, S.defaults).map(function (r) {
+      var cfg = o.levers[r.key] || {}, v0 = leverValueNow(r.key), floor = codeFloor(r.key);
+      var lo = cfg.lo !== undefined && cfg.lo !== '' ? Math.max(r.lo, +cfg.lo) : (floor != null ? Math.max(r.lo, floor) : r.lo);
+      var hi = cfg.hi !== undefined && cfg.hi !== '' ? Math.min(r.hi, +cfg.hi) : r.hi;
+      return {key: r.key, v0: v0, lo: Math.min(lo, v0), hi: Math.max(hi, v0), trainedLo: r.lo, trainedHi: r.hi,
+        int: !!(D.fields[r.key] || {}).int, on: cfg.on !== undefined ? cfg.on : PROGRAM_LEVERS.indexOf(r.key) < 0, cost: parseFloat(cfg.cost) > 0 ? parseFloat(cfg.cost) : 0};
+    });
+  }
+
+  function runOptimizer() {
+    var mk = modelKeyFor(S.type, S.station), m = mk && SUR[mk], o = S.opt;
+    var tc = parseFloat(o.clg), th = parseFloat(o.htg);
+    if (!m || (isNaN(tc) && isNaN(th))) return;
+    var sc0 = S.sc, def = S.defaults, gfa = sc0.gfa_m2;
+    var names = ['clg_db_' + S.coolPct + '|total_w_m2', 'clg_dp_' + S.coolPct + '|total_w_m2', 'htg_' + S.heatPct + '|total_w_m2'];
+    var levers = optLevers().filter(function (l) { return l.on && l.hi > l.lo; });
+    function evaluate(vals) {
+      var sc = sc0;
+      Object.keys(vals).forEach(function (k) { if (vals[k] !== leverValueNow(k)) sc = sweepScenario(sc, def, k, vals[k]); });
+      var p = C.predictSome(m, sc, names);
+      return {clg: Math.max(p[names[0]], p[names[1]]) * gfa * sc0.cooling_sizing_factor, htg: p[names[2]] * gfa * sc0.heating_sizing_factor};
+    }
+    var r = C.optimize(levers, evaluate, {clg: isNaN(tc) ? null : tc / 100, htg: isNaN(th) ? null : th / 100});
+    o.result = {hash: scenarioHash(sc0) + '|' + S.coolPct + '|' + S.heatPct, r: r, levers: levers, failed: C.failedTest(m, S.type)};
+  }
+
+  function optimizerCard(g) {
+    var mk = modelKeyFor(S.type, S.station), m = mk && SUR[mk], o = S.opt;
+    var h = '<div class="card"><div class="card-head"><div><h2>Reach a target</h2><p class="sub">Set a peak reduction, choose the ' +
+      'levers you\'ll allow, and the tool searches the trained model for settings that get there. Ranges start at the realistic range ' +
+      'the models were trained on; you can narrow them.</p></div></div>';
+    if (!m) return h + '<p class="sub">Needs a trained model for this building type and station.</p></div>';
+    h += '<div class="opt-targets"><label>Reduce cooling peak by <input id="f-opt-clg" type="number" min="1" max="90" step="1" value="' +
+      esc(o.clg) + '"> %</label><label>Reduce heating peak by <input id="f-opt-htg" type="number" min="1" max="90" step="1" value="' +
+      esc(o.htg) + '"> % <span class="sub">(blank = no target)</span></label></div>';
+    var levers = optLevers();
+    h += '<details class="opt-levers"' + (o.showLevers ? ' open' : '') + ' id="opt-levers"><summary>Levers (' +
+      levers.filter(function (l) { return l.on; }).length + ' of ' + levers.length + ' allowed)</summary>' +
+      '<div class="scroll-x"><table class="t"><thead><tr><th>Allow</th><th>Lever</th><th>Now</th><th>Lowest</th><th>Highest</th><th>Cost per unit ($, optional)</th></tr></thead><tbody>';
+    levers.forEach(function (l) {
+      h += '<tr><td><input type="checkbox" data-opt-on="' + l.key + '"' + (l.on ? ' checked' : '') + '></td><td>' + esc(SWEEP_LABELS[l.key]) + '</td>' +
+        '<td class="num">' + sweepValue(l.key, l.v0) + '</td>' +
+        '<td><input class="opt-num" type="number" step="any" data-opt-lo="' + l.key + '" value="' + esc(+l.lo.toFixed(3)) + '" title="Trained range starts at ' + esc(+l.trainedLo.toFixed(3)) + '"></td>' +
+        '<td><input class="opt-num" type="number" step="any" data-opt-hi="' + l.key + '" value="' + esc(+l.hi.toFixed(3)) + '" title="Trained range ends at ' + esc(+l.trainedHi.toFixed(3)) + '"></td>' +
+        '<td><input class="opt-num" type="number" min="0" step="any" data-opt-cost="' + l.key + '" value="' + esc((o.levers[l.key] || {}).cost || '') + '"></td></tr>';
+    });
+    h += '</tbody></table></div><p class="sub" style="margin:6px 0 0">Equipment power and occupant density start switched off (they follow ' +
+      'the client\'s use, not the design). Outdoor air starts at the code rate as its lowest value. Values are in the input\'s own units (WWR and heat recovery as fractions). ' +
+      'Cost is your $ for the whole building per unit change of that input; only used for the lowest-cost option.</p></details>';
+    h += '<div class="actions"><button class="btn primary" type="button" id="b-opt">Find options</button></div>';
+    var res = o.result, key = scenarioHash(S.sc) + '|' + S.coolPct + '|' + S.heatPct;
+    if (!res) return h + '</div>';
+    if (res.hash !== key) return h + '<div class="note info">Inputs have changed since the last search.</div></div>';
+    var r = res.r, b = r.baseline;
+    if (res.failed) h += '<div class="note warn">The model for this type and station missed the accuracy limit, so these options are indicative. Confirm the one you choose with EnergyPlus.</div>';
+    function pct(v, base) { return (v - base) / base * 100; }
+    function option(title, pt, note) {
+      if (!pt) return '<div class="opt-col"><h3>' + esc(title) + '</h3><p class="sub">' + esc(note || 'No option found.') + '</p></div>';
+      var d = r.describe(pt), x = '<div class="opt-col"><h3>' + esc(title) + '</h3><ul class="opt-moves">';
+      d.moved.forEach(function (mv) {
+        x += '<li><b>' + esc(SWEEP_LABELS[mv.key]) + '</b> ' + sweepValue(mv.key, mv.from) + ' → ' + sweepValue(mv.key, mv.to) + '</li>';
+      });
+      x += '</ul><div class="opt-res">Cooling ' + fmt(tons(d.result.clg), 1) + ' tons <b class="' + (pct(d.result.clg, b.clg) < 0 ? 'good' : 'bad') + '">' +
+        fmt(pct(d.result.clg, b.clg), 1) + '%</b> · Heating ' + fmt(mbh(d.result.htg), 0) + ' MBH <b class="' + (pct(d.result.htg, b.htg) <= 0 ? 'good' : 'bad') + '">' +
+        (pct(d.result.htg, b.htg) > 0 ? '+' : '') + fmt(pct(d.result.htg, b.htg), 1) + '%</b>';
+      var ct = parseFloat(S.rates.cooling[S.plant.cooling]), cm = parseFloat(S.rates.heating[S.plant.heating]);
+      if (!isNaN(ct) || !isNaN(cm)) {
+        var save = (isNaN(ct) ? 0 : (tons(b.clg) - tons(d.result.clg)) * ct) + (isNaN(cm) ? 0 : (mbh(b.htg) - mbh(d.result.htg)) * cm);
+        x += '<br>Plant cost ' + (save >= 0 ? '−$' : '+$') + fmt(Math.abs(save), 0);
+      }
+      if (d.cost) x += '<br>Your lever cost $' + fmt(d.cost, 0);
+      x += '</div><div class="actions"><button class="btn" type="button" data-opt-apply="' + title + '">Apply</button>' +
+        '<button class="btn" type="button" data-opt-apply-run="' + title + '">Apply and run EnergyPlus</button></div></div>';
+      o.picks = o.picks || {}; o.picks[title] = d.values;
+      return x;
+    }
+    if (r.feasible) {
+      h += '<div class="opt-cols">' + option('Fewest changes', r.fewest, 'None within 6 levers.') + option('Smallest overall change', r.smallest) +
+        option('Lowest cost', r.cheapest, 'Enter a cost per unit for some levers to rank by cost.') + '</div>';
+    } else {
+      h += '<div class="note warn">These levers can\'t reach the target within their ranges. The most they achieve together is shown below; ' +
+        'allow more levers, widen a range, or lower the target.</div><div class="opt-cols">' + option('Best achievable', r.bestAchievable) + '</div>';
+    }
+    h += '<h3>Best reduction with 1, 2, 3 … levers</h3><div class="opt-count">' + r.byCount.map(function (c) {
+      var pc = -pct(c.best.clg, b.clg);
+      return '<div class="opt-count-row"><span>' + c.levers + '</span><div class="bd-bar"><div class="fill cooling" style="left:0;width:' +
+        Math.max(0, Math.min(100, pc)) + '%"></div></div><span class="num">−' + fmt(pc, 1) + '% cooling</span></div>';
+    }).join('') + '</div><p class="sub" style="margin-top:6px">Estimates from the trained model; confirm the option you choose with EnergyPlus.</p></div>';
+    return h;
+  }
+
   // Display a swept input value in everyday units.
   function sweepValue(key, v) {
     if (key === 'wwr') return fmt(v * 100, 0) + '%';
@@ -1123,6 +1241,7 @@
     if (S.tab === 'summary') {
       if (g) h += designDayCard(g, b) + breakdownCard(g, b);
       h += sensitivityCard();
+      if (g) h += optimizerCard(g);
       if (g) h += costCard(g, b);
       h += annualCard();
     } else {
@@ -1211,6 +1330,15 @@
     else if (t.id === 'b-run') runEnergyPlus();
     else if (t.id === 'b-annual') runAnnual();
     else if (t.id === 'b-epsens') runEpSweep();
+    else if (t.id === 'b-opt') { t.disabled = true; t.textContent = 'Searching…'; setTimeout(function () { runOptimizer(); render(); }, 20); }
+    else if (t.getAttribute('data-opt-apply') || t.getAttribute('data-opt-apply-run')) {
+      var vals = S.opt.picks[t.getAttribute('data-opt-apply') || t.getAttribute('data-opt-apply-run')];
+      if (vals) {
+        Object.keys(vals).forEach(function (k) { if (vals[k] !== leverValueNow(k)) S.sc = sweepScenario(S.sc, S.defaults, k, vals[k]); });
+        renderInputs(); render();
+        if (t.getAttribute('data-opt-apply-run') && S.engine && S.engine.available) runEnergyPlus();
+      }
+    }
     else if (t.id === 'b-base') {
       S.baseline = {sc: JSON.parse(JSON.stringify(S.sc)), ep: S.ep && S.ep.hash === scenarioHash(S.sc) ? S.ep : null};
       render();
@@ -1234,6 +1362,21 @@
     if (g) S.open[g] = e.target.open;
   }, true);
   document.addEventListener('click', onClick);
+  // Optimizer inputs live in the results panel: store them without
+  // re-rendering, so typing keeps focus; the search runs on "Find options".
+  var resultsEl = document.getElementById('results');
+  function onOptInput(e) {
+    var t = e.target, o = S.opt, k;
+    if (t.id === 'f-opt-clg') o.clg = t.value;
+    else if (t.id === 'f-opt-htg') o.htg = t.value;
+    else if ((k = t.getAttribute('data-opt-on'))) (o.levers[k] = o.levers[k] || {}).on = t.checked;
+    else if ((k = t.getAttribute('data-opt-lo'))) (o.levers[k] = o.levers[k] || {}).lo = t.value;
+    else if ((k = t.getAttribute('data-opt-hi'))) (o.levers[k] = o.levers[k] || {}).hi = t.value;
+    else if ((k = t.getAttribute('data-opt-cost'))) (o.levers[k] = o.levers[k] || {}).cost = t.value;
+  }
+  resultsEl.addEventListener('input', onOptInput);
+  resultsEl.addEventListener('change', onOptInput);
+  resultsEl.addEventListener('toggle', function (e) { if (e.target.id === 'opt-levers') S.opt.showLevers = e.target.open; }, true);
   fetch('api/engine').then(function (r) { return r.json(); })
     .then(function (st) { S.engine = st; render(); })
     .catch(function () { S.engine = {available: false, reason: 'No EnergyPlus service (page opened without python server.py).'}; render(); });
