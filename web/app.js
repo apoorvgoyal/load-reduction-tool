@@ -1926,9 +1926,10 @@
   // The results header stays at the top of the pane; once the answer cards
   // have scrolled away it also shows the two peaks, so they stay in view.
   function watchPeaks() {
-    var head = document.querySelector('.rp-head'), card = document.querySelector('.acard.heat');
+    var head = document.querySelector('.rp-head'), card = document.querySelector('.acard.cool');
     if (!head || !card) return;
-    // Pin once the heating card (the lower of the two) has passed under the header.
+    // Pin as soon as the cooling card (the first) has passed under the header,
+    // so both peaks are in view before the reader reaches the next section.
     head.classList.toggle('stuck', card.getBoundingClientRect().bottom < head.getBoundingClientRect().bottom + 8);
   }
 
