@@ -995,7 +995,19 @@
       'it uses of that input\'s room, from its current value to the end of its range.</p>';
     var res = o.result, key = scenarioHash(S.sc) + '|' + S.coolPct + '|' + S.heatPct;
     if (!res) return h + '</div>' + eng + '</details></section>';
-    if (res.hash !== key) return h + '<div class="gc-c"><span class="pstat no">Your answers changed since this plan. Select Update plan.</span></div></div>' + eng + '</details></section>';
+    if (res.hash !== key) {
+      // The plan itself changed the answers (Apply plan / Check in EnergyPlus): say so, not "out of date".
+      var ap = o.applied && o.applied.hash === key ? o.applied : null;
+      if (ap) {
+        var epNow = S.ep && S.ep.hash === scenarioHash(S.sc);
+        return h + '<div class="gc-c"><span class="pstat ok">✓ Plan applied to your answers</span><p class="sub">' +
+          (S.running ? 'EnergyPlus is checking it now; the results above update when it finishes.' :
+            epNow ? 'Checked in EnergyPlus: the results above are a full simulation of your answers with this plan.' :
+            'The results above include these changes. Select Run full simulation to check them in EnergyPlus.') +
+          ' To look for a different plan, change a goal and select Update plan.</p></div><div class="gc-d">' + ap.list + '</div></div>' + eng + '</details></section>';
+      }
+      return h + '<div class="gc-c"><span class="pstat no">Your answers changed since this plan. Select Update plan.</span></div></div>' + eng + '</details></section>';
+    }
     var r = res.r, b = r.baseline, wantC = r.goal.clg != null, wantH = r.goal.htg != null;
     if (res.failed) h += '<div class="note warn gc-full">The trained model for this type and location missed the accuracy limit, so this plan is indicative. Check it in EnergyPlus.</div>';
     var plans = r.feasible ? [['fewest', 'Fewest changes', r.fewest], ['smallest', 'Smallest overall change', r.smallest], ['cheapest', 'Lowest cost', r.cheapest]]
@@ -1008,12 +1020,14 @@
     var status = okC && okH ? (wantC && wantH ? 'Plan reaches both goals' : wantC ? 'Plan reaches the cooling goal' : 'Plan reaches the heating goal') +
       ' (cooling −' + fmt(gotC, 1) + '%, heating ' + (gotH >= 0 ? '−' : '+') + fmt(Math.abs(gotH), 1) + '%)'
       : 'Best possible: cooling −' + fmt(gotC, 1) + '%, heating ' + (gotH >= 0 ? '−' : '+') + fmt(Math.abs(gotH), 1) + '%';
+    o.lastList = null;
     var list = '<ul class="checklist">' + d.moved.map(function (mv) {
       return '<li><span class="tick" aria-hidden="true">✓</span><div><b>' + plainAction(mv.key, mv.to, !wantC) + '</b><span class="rk-hint">' +
         esc(SWEEP_LABELS[mv.key]) + ': ' + sweepValue(mv.key, mv.from) + ' → ' + sweepValue(mv.key, mv.to) + '</span></div>' +
         '<span class="eff cool" title="Cooling">' + SNOW + 'C ' + (mv.saves.clg >= 0 ? '−' : '+') + fmt(Math.abs(mv.saves.clg / b.clg * 100), 1) + '%</span>' +
         '<span class="eff heat" title="Heating">' + FLAME + 'H ' + (mv.saves.htg >= 0 ? '−' : '+') + fmt(Math.abs(mv.saves.htg / b.htg * 100), 1) + '%</span></li>';
     }).join('') + '</ul>';
+    o.lastList = list;
     h += '<div class="gc-c"><span class="pstat ' + (okC && okH ? 'ok' : 'no') + '">' + esc(status) + '</span>' +
       (plans.length > 1 ? seg('planPick', plans.map(function (x) { return [x[0], x[1]]; }), pick[0]) : '') +
       '<div class="actions"><button class="btn" type="button" data-opt-apply="' + esc(pick[1]) + '">Apply plan (' + d.moved.length + ' change' + (d.moved.length === 1 ? '' : 's') + ')</button>' +
@@ -2112,8 +2126,11 @@
       if (vals) {
         var ch = Object.keys(vals).filter(function (k) { return Math.abs(vals[k] - leverValueNow(k)) > 1e-12; })
           .map(function (k) { return {key: k, v: vals[k]}; });
+        var list = S.opt.lastList;
         applyChanges(ch);
+        S.opt.applied = {hash: scenarioHash(S.sc) + '|' + S.coolPct + '|' + S.heatPct, list: list};
         if (t.getAttribute('data-opt-apply-run') && S.engine && S.engine.available) runEnergyPlus();
+        else render();
       }
     }
     else if (t.id === 'b-base') {
