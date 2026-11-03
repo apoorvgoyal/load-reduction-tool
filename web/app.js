@@ -447,7 +447,7 @@
   // ── Rendering: shared pieces ────────────────────────────────────────────
   function unitsToggle() {
     return '<div class="units-toggle" role="group" aria-label="Units">' +
-      '<button type="button" data-units="ip" aria-pressed="' + isIP() + '"' + (isIP() ? ' class="on"' : '') + '>US units</button>' +
+      '<button type="button" data-units="ip" aria-pressed="' + isIP() + '"' + (isIP() ? ' class="on"' : '') + '>Imperial</button>' +
       '<button type="button" data-units="si" aria-pressed="' + !isIP() + '"' + (!isIP() ? ' class="on"' : '') + '>Metric</button></div>';
   }
   function renderStatus() { document.getElementById('status').innerHTML = unitsToggle(); }
@@ -1764,10 +1764,16 @@
     if (!(r > 0) || w == null) return null;
     return (kind === 'cooling' ? tons(w) : mbh(w)) * r;
   }
+  // " on 21 July": the date of the station's design day that sets this peak.
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  function ddDate(key) {
+    var st = stationById(S.station), r = key && st && st.design_days && st.design_days[key];
+    return r && r.month ? ' on ' + r.day + ' ' + MONTHS[r.month - 1] : '';
+  }
   function answerCardV3(kind, g, ref, refName) {
     var cool = kind === 'cooling', cls = cool ? 'cool' : 'heat';
     var h = '<article class="acard ' + cls + (g ? '' : ' grey') + '"><div class="ac-left"><div class="ac-label">' + (cool ? SNOW : FLAME) +
-      (cool ? 'Cooling equipment needed' : 'Heating equipment needed') + '</div>';
+      (cool ? 'Cooling' : 'Heating') + ' peak load' + ddDate(g && (cool ? g.cKey : g.hKey)) + '</div>';
     if (!g) {
       return h + '<div class="ac-num">—<span>' + (cool ? uC() : uH()) + '</span></div><p class="ac-when">Run a full simulation to get this number.</p></div>' +
         '<div class="ac-right"><div class="ac-rt">Where it comes from</div><p class="sub">Appears with the result.</p></div></article>';
