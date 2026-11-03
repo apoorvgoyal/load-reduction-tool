@@ -1983,7 +1983,9 @@
   // comes from as a stacked bar.
   function typicalResult() {
     var typ = JSON.parse(JSON.stringify(S.defaults));
-    ['gfa_m2', 'n_floors', 'aspect_ratio', 'north_axis_deg'].forEach(function (k) { typ[k] = S.sc[k]; });
+    // Size is the project's; shape and rotation are design choices with a
+    // Typical of their own, so the comparison shows their effect too.
+    ['gfa_m2', 'n_floors'].forEach(function (k) { typ[k] = S.sc[k]; });
     typ.station = S.station;
     var r = resultFor(typ, null);
     return r.source === 'none' ? null : governed(r, typ);
