@@ -37,11 +37,12 @@ The surrogate is only used when it passed its independent test against fresh Ene
 
 ## What the page shows
 
+- **Units (IP / SI)**, top right. Inputs are stored in SI (the engine's units) and shown and typed in the selected system; results switch between tons/MBH and kW, cfm and L/s, °F and °C, kBtu/ft² and kWh/m². Plant rates are stored per ton and per MBH and shown per kW in SI. Retyping a shown default restores the exact SI default, so rounding never marks an input as changed.
 - **Summary tab**
   - Headline block peaks (cooling tons, heating MBH) for the selected design condition, with change against a saved baseline.
   - Bar charts of every design day in the weather file: cooling 0.4/1/2% on the dry-bulb and dew-point days, heating 99.6/99%.
-  - **Where the peak load comes from**: each peak split into people, lighting, equipment, window solar and conduction, walls, roof, ground floor, infiltration, internal mass, ventilation and heat recovery, as absolute values or % of the peak. It sums exactly to the peak (method under "What the model is").
-  - **Which design choices move the peak most**: each input swept to the low and high end of its realistic range. The bars come from the trained model when one exists (marked indicative where it failed its test). **Run exact sweep in EnergyPlus** replaces them with EnergyPlus results: the scenario plus two runs per input, about a minute on a PC.
+  - **Where the peak load comes from**: each peak split into people, lighting, equipment, window solar and conduction, walls, roof, ground floor, infiltration, internal mass, ventilation and heat recovery, as a pie per load with each source's value and share; sources that lower the peak (heat recovery, heat stored in the structure) are listed under it. Sources less credits equal the peak (method under "What the model is").
+  - **Which design choices move the peak most**: a ranked list of the changes that lower the peak most, each tried on its own (each input at the end of its realistic range that lowers the peak), with a collapsed technical view of both ends of every range. The figures come from the trained model when one exists (marked indicative where it failed its test). **Run exact sweep in EnergyPlus** replaces them with EnergyPlus results: the scenario plus two runs per input, about a minute on a PC.
   - **Plant cost**: capacity × your own $/ton and $/MBH for the plant type you choose. No built-in cost data.
   - **Annual energy and carbon**: see below.
 - **Detailed data tab**: SHR, supply air, ventilation load, the comparison table, EnergyPlus run detail (profiles, component table, zone sizing, IDF and JSON downloads), design conditions, and defaults still awaiting confirmation.

@@ -33,17 +33,58 @@
   var STORE_KEY = 'peak-load-tool.v2';
 
   // ── Units ───────────────────────────────────────────────────────────────
-  var IP = {
-    'm2': function (v) { return fmt(v * 10.7639, 0) + ' ft²'; },
-    'm': function (v) { return fmt(v * 3.28084, 1) + ' ft'; },
-    'W/m2-K': function (v) { return fmt(v * 0.17611, 3) + ' Btu/h·ft²·°F'; },
-    'C': function (v) { return fmt(v * 9 / 5 + 32, 1) + ' °F'; },
-    'L/s-person': function (v) { return fmt(v * 2.11888, 1) + ' cfm/person'; },
-    'L/s-m2': function (v) { return fmt(v * 0.19685, 3) + ' cfm/ft²'; },
-    'W/m2': function (v) { return fmt(v / 10.7639, 2) + ' W/ft²'; },
-    'm2/person': function (v) { return fmt(v * 10.7639, 0) + ' ft²/person'; },
-    'W/m-K': function (v) { return 'F-' + fmt(v * 0.57779, 2) + ' Btu/h·ft·°F'; }
+  // Inputs are stored in SI (the engine's units). In IP mode they are shown
+  // and typed in IP and converted on entry. k, off: ip = si * k + off; dp: IP
+  // decimals shown in the input box.
+  var UNITS = {
+    'm2': {si: 'm²', ip: 'ft²', k: 10.7639, dp: 0},
+    'm': {si: 'm', ip: 'ft', k: 3.28084, dp: 1},
+    'W/m2-K': {si: 'W/m²·K', ip: 'Btu/h·ft²·°F', k: 0.17611, dp: 3},
+    'C': {si: '°C', ip: '°F', k: 1.8, off: 32, dp: 1},
+    'L/s-person': {si: 'L/s·person', ip: 'cfm/person', k: 2.11888, dp: 1},
+    'L/s-m2': {si: 'L/s·m²', ip: 'cfm/ft²', k: 0.19685, dp: 3},
+    'W/m2': {si: 'W/m²', ip: 'W/ft²', k: 1 / 10.7639, dp: 2},
+    'm2/person': {si: 'm²/person', ip: 'ft²/person', k: 10.7639, dp: 0},
+    'W/m-K': {si: 'W/m·K', ip: 'Btu/h·ft·°F', k: 0.57779, dp: 3},
+    'W/(L/s)': {si: 'W per L/s', ip: 'W per cfm', k: 1 / 2.11888, dp: 3}
   };
+  function isIP() { return S.units !== 'si'; }
+  function toIP(unit, v) { var u = UNITS[unit]; return v * u.k + (u.off || 0); }
+  function fromIP(unit, v) { var u = UNITS[unit]; return (v - (u.off || 0)) / u.k; }
+  // Value as shown in an input box, in the selected system.
+  function toDisp(unit, v) {
+    if (v === null || v === undefined || v === '' || typeof v !== 'number' && isNaN(+v)) return v;
+    if (!UNITS[unit] || !isIP()) return typeof v === 'number' ? +v.toFixed(4) : v;
+    return +toIP(unit, +v).toFixed(UNITS[unit].dp);
+  }
+  function fromDisp(unit, v) { return UNITS[unit] && isIP() ? fromIP(unit, v) : v; }
+  function unitLabel(unit) {
+    var u = UNITS[unit];
+    if (!u) return unit === '-' || unit === 'deg' || unit === 'bool' ? '' : unit;
+    return isIP() ? u.ip : u.si;
+  }
+  // The same value in the other system, shown under the input.
+  function otherUnits(unit, v) {
+    var u = UNITS[unit];
+    if (!u || v === null || v === undefined || v === '') return '';
+    return isIP() ? fmt(+v, u.dp + 1) + ' ' + u.si : fmt(toIP(unit, +v), u.dp) + ' ' + u.ip;
+  }
+  // Results. Cooling: tons (IP) or kW; heating: MBH (IP) or kW.
+  function capC(w) { return isIP() ? tons(w) : w / 1000; }
+  function capH(w) { return isIP() ? mbh(w) : w / 1000; }
+  function uC() { return isIP() ? 'tons' : 'kW'; }
+  function uH() { return isIP() ? 'MBH' : 'kW'; }
+  function temp(c, dp) { return isIP() ? fmt(c * 1.8 + 32, dp) + ' °F' : fmt(c, dp) + ' °C'; }
+  function area(m2) { return isIP() ? fmt(m2 * C.FT2_PER_M2, 0) + ' ft²' : fmt(m2, 0) + ' m²'; }
+  // Plant rates are stored per ton and per MBH; in SI they are shown per kW.
+  function rateToDisp(kind, r) {
+    if (r === '' || r === undefined || isIP()) return r;
+    return +(kind === 'cooling' ? r / C.KW_PER_TON : r * C.MBH_PER_KW).toFixed(2);
+  }
+  function rateFromDisp(kind, r) {
+    if (r === '' || isNaN(parseFloat(r)) || isIP()) return r;
+    return kind === 'cooling' ? parseFloat(r) * C.KW_PER_TON : parseFloat(r) / C.MBH_PER_KW;
+  }
 
   // ── Input layout ────────────────────────────────────────────────────────
   // [key, label, unit, step]. Groups marked `open` start expanded. The
@@ -119,8 +160,8 @@
   // Design inputs swept in the sensitivity chart, over the trained design space.
   var SWEEP_LABELS = {
     wwr: 'Window-to-wall ratio', wall_u: 'Wall U', roof_u: 'Roof U', win_u: 'Window U', shgc: 'SHGC',
-    overhang_pf: 'Overhang PF', m2_per_person: 'Area per person', lpd_w_m2: 'Lighting W/m²',
-    epd_w_m2: 'Equipment W/m²', oa_multiplier: 'Outdoor air (× 62.1 rate)', oa_ach: 'Outdoor air ACH',
+    overhang_pf: 'Overhang PF', m2_per_person: 'Area per person', lpd_w_m2: 'Lighting power',
+    epd_w_m2: 'Equipment power', oa_multiplier: 'Outdoor air (× 62.1 rate)', oa_ach: 'Outdoor air ACH',
     erv_sensible_eff: 'ERV sensible eff.',
     erv_latent_eff: 'ERV latent eff.', infiltration_ach: 'Infiltration ACH', t_cool_c: 'Cooling setpoint',
     t_heat_c: 'Heating setpoint', n_floors: 'Floors (same GFA)', aspect_ratio: 'Aspect ratio',
@@ -152,7 +193,7 @@
   // ── State ───────────────────────────────────────────────────────────────
   var S = {type: 'office', station: 'chicago', czOverride: null, coolPct: '0.4', heatPct: '99.6',
     sc: null, prov: null, verify: null, defaults: null, baseline: null, ep: null, open: {}, tzLoad: 'cooling',
-    tab: 'summary', bdMode: 'abs', showSources: false,
+    tab: 'summary', bdMode: 'abs', showSources: false, units: 'ip',
     plant: {cooling: PLANTS.cooling[0], heating: PLANTS.heating[0]}, rates: {cooling: {}, heating: {}},
     epSens: null, epSensRunning: null, epSensError: null,
     opt: {clg: '', htg: '', levers: {}, result: null, showLevers: false},
@@ -188,7 +229,7 @@
   function save() {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify({type: S.type, station: S.station, czOverride: S.czOverride,
-        coolPct: S.coolPct, heatPct: S.heatPct, sc: S.sc, baseline: S.baseline, tab: S.tab, bdMode: S.bdMode,
+        coolPct: S.coolPct, heatPct: S.heatPct, sc: S.sc, baseline: S.baseline, tab: S.tab, bdMode: S.bdMode, units: S.units,
         showSources: S.showSources, plant: S.plant, rates: S.rates, energy: S.energy, annual: S.annual}));
     } catch (e) { /* storage unavailable: state just isn't remembered */ }
   }
@@ -199,6 +240,7 @@
       if (!s || !D.archetypes.types[s.type]) return false;
       S.type = s.type; S.station = stationById(s.station).id; S.czOverride = s.czOverride || null;
       S.coolPct = s.coolPct || '0.4'; S.heatPct = s.heatPct || '99.6';
+      S.units = s.units === 'si' ? 'si' : 'ip';
       S.tab = s.tab === 'details' ? 'details' : 'summary'; S.bdMode = s.bdMode === 'pct' ? 'pct' : 'abs';
       S.showSources = !!s.showSources;
       if (s.plant) S.plant = s.plant;
@@ -295,7 +337,7 @@
     var def = S.defaults[key], src = S.prov[key] || '';
     if (isChanged(key, unit)) {
       return '<span class="changed">Changed (default ' +
-        (unit === 'bool' ? (def ? 'on' : 'off') : esc(def === null ? 'none' : def)) + ')</span>';
+        (unit === 'bool' ? (def ? 'on' : 'off') : esc(def === null ? 'none' : toDisp(unit, def))) + ')</span>';
     }
     return S.showSources ? esc(src) : '';
   }
@@ -310,17 +352,18 @@
     var v = S.sc[key], spec = D.fields[key] || {};
     var vb = S.verify[key] ? '<span class="verify" title="Default not yet checked against its cited source">verify</span>' : '';
     var hint = '<span class="hint" data-src="' + key + '">' + srcHint(key, unit) + '</span>';
-    var ip = (IP[unit] && v !== null && v !== '' && v !== undefined) ? IP[unit](+v) : '';
+    var ip = otherUnits(unit, v), dv = toDisp(unit, v);
     if (unit === 'bool') {
       return '<div class="field"><label for="f-' + key + '">' + esc(label) + vb + '</label>' +
         '<input id="f-' + key + '" type="checkbox" data-k="' + key + '"' + (v ? ' checked' : '') + ' style="width:auto;justify-self:end">' +
         hint + '</div>';
     }
-    var u = unit === '-' || unit === 'deg' ? '' : ' (' + unit.replace('m2', 'm²') + ')';
+    var ul = unitLabel(unit), u = ul ? ' (' + ul + ')' : '';
+    var mn = spec.min !== undefined ? toDisp(unit, spec.min) : undefined, mx = spec.max !== undefined ? toDisp(unit, spec.max) : undefined;
     return '<div class="field"><label for="f-' + key + '">' + esc(label) + '<span class="unit">' + esc(u) + '</span>' + vb + '</label>' +
-      '<input id="f-' + key + '" type="number" inputmode="decimal" data-k="' + key + '" step="' + step + '"' +
-      (spec.min !== undefined ? ' min="' + spec.min + '" max="' + spec.max + '"' : '') +
-      ' value="' + (v === null || v === undefined ? '' : v) + '">' +
+      '<input id="f-' + key + '" type="number" inputmode="decimal" data-k="' + key + '" step="' + (isIP() && UNITS[unit] ? 'any' : step) + '"' +
+      (mn !== undefined ? ' min="' + mn + '" max="' + mx + '"' : '') +
+      ' value="' + (dv === null || dv === undefined ? '' : dv) + '">' +
       (ip ? '<span class="ip" data-ip="' + key + '">' + ip + '</span>' : '<span class="ip" data-ip="' + key + '"></span>') + hint + '</div>';
   }
 
@@ -377,28 +420,29 @@
         return '<option value="' + o[0] + '"' + (E.heatSource === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
       }).join('') + '</select></div>' +
       (heatEffLabel ? energyField('heatEff', heatEffLabel, 0.01) : '') +
-      energyField('sfp', 'Fan power (W per L/s of supply air)', 0.1) +
+      energyField('sfp', 'Fan power (' + (isIP() ? 'W per cfm' : 'W per L/s') + ' of supply air)', 'any', 'W/(L/s)') +
       energyField('efElec', 'Electricity carbon factor (kg CO₂e per kWh)', 0.001) +
       (E.heatSource === 'gas' ? energyField('efGas', 'Gas carbon factor (kg CO₂e per therm)', 0.01) : '') + '</details>';
     h += '<details class="grp" data-g="Plant cost"' + (S.open['Plant cost'] ? ' open' : '') + '><summary>Plant cost</summary>' +
       '<p class="sub">Your installed-cost rates per plant type. The tool has no built-in cost data.</p>';
     ['cooling', 'heating'].forEach(function (kind) {
-      var unit = kind === 'cooling' ? '$ per ton' : '$ per MBH', cur = S.plant[kind];
+      var unit = isIP() ? (kind === 'cooling' ? '$ per ton' : '$ per MBH') : '$ per kW', cur = S.plant[kind];
       h += '<div class="field wide"><label for="f-plant-' + kind + '">' + (kind === 'cooling' ? 'Cooling plant' : 'Heating plant') + '</label>' +
         '<select id="f-plant-' + kind + '">' + PLANTS[kind].map(function (p) {
           return '<option' + (p === cur ? ' selected' : '') + '>' + esc(p) + '</option>';
         }).join('') + '</select></div>' +
         '<div class="field"><label for="f-rate-' + kind + '">' + esc(cur) + ' (' + unit + ')</label>' +
-        '<input id="f-rate-' + kind + '" type="number" min="0" step="10" value="' + esc(S.rates[kind][cur] || '') + '"></div>';
+        '<input id="f-rate-' + kind + '" type="number" min="0" step="10" value="' + esc(rateToDisp(kind, S.rates[kind][cur] || '')) + '"></div>';
     });
     h += '</details>';
     h += '<div class="actions"><button class="btn" id="b-reset" type="button">Reset to defaults</button></div>';
     document.getElementById('inputs').innerHTML = h;
   }
 
-  function energyField(k, label, step) {
+  function energyField(k, label, step, unit) {
+    var v = S.energy[k], dv = unit && v !== '' && !isNaN(parseFloat(v)) ? toDisp(unit, parseFloat(v)) : v;
     return '<div class="field"><label for="f-e-' + k + '">' + esc(label) + '</label><input id="f-e-' + k +
-      '" type="number" min="0" step="' + step + '" value="' + esc(S.energy[k]) + '"></div>';
+      '" type="number" min="0" step="' + step + '" value="' + esc(dv) + '"></div>';
   }
 
   // ── Rendering: shared pieces ────────────────────────────────────────────
@@ -412,6 +456,8 @@
       h += '<span class="pill ' + (passed ? 'ok' : 'off') + '"><span class="dot"></span>Instant estimates: ' +
         (passed ? 'tested' : 'not used here') + '</span>';
     } else h += '<span class="pill off"><span class="dot"></span>Instant estimates: none for this type/station</span>';
+    h += '<div class="units-toggle" role="group" aria-label="Units"><button type="button" data-units="ip"' + (isIP() ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') +
+      '>IP</button><button type="button" data-units="si"' + (!isIP() ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + '>SI</button></div>';
     document.getElementById('status').innerHTML = h;
   }
 
@@ -431,12 +477,13 @@
   function headlineKpis(g, b) {
     var ft2 = g.gfa * C.FT2_PER_M2, t = tons(g.clg), m = mbh(g.htg);
     var h = '<div class="kpis two">';
-    h += '<div class="kpi cool"><div class="kpi-label">Peak cooling (block)</div><div class="kpi-value">' + fmt(t, 1) + '<span class="kpi-unit">tons</span></div>' +
-      '<div class="kpi-sec">' + fmt(g.clg / 1000, 0) + ' kW · ' + fmt(g.clg / g.gfa, 1) + ' W/m² · ' + fmt(ft2 / t, 0) + ' ft²/ton</div>' +
-      deltaHtml(t, b && tons(b.clg), function (v) { return fmt(v, 1) + ' tons'; }) + '</div>';
-    h += '<div class="kpi heat"><div class="kpi-label">Peak heating (block)</div><div class="kpi-value">' + fmt(m, 0) + '<span class="kpi-unit">MBH</span></div>' +
-      '<div class="kpi-sec">' + fmt(g.htg / 1000, 0) + ' kW · ' + fmt(g.htg / g.gfa, 1) + ' W/m² · ' + fmt(m * 1000 / ft2, 1) + ' Btu/h·ft²</div>' +
-      deltaHtml(m, b && mbh(b.htg), function (v) { return fmt(v, 0) + ' MBH'; }) + '</div>';
+    var cC = capC(g.clg), cH = capH(g.htg);
+    h += '<div class="kpi cool"><div class="kpi-label">Peak cooling (block)</div><div class="kpi-value">' + fmt(cC, isIP() ? 1 : 0) + '<span class="kpi-unit">' + uC() + '</span></div>' +
+      '<div class="kpi-sec">' + (isIP() ? fmt(ft2 / t, 0) + ' ft²/ton · ' + fmt(g.clg / 1000, 0) + ' kW' : fmt(g.clg / g.gfa, 1) + ' W/m² · ' + fmt(t, 1) + ' tons') + '</div>' +
+      deltaHtml(cC, b && capC(b.clg), function (v) { return fmt(v, isIP() ? 1 : 0) + ' ' + uC(); }) + '</div>';
+    h += '<div class="kpi heat"><div class="kpi-label">Peak heating (block)</div><div class="kpi-value">' + fmt(cH, 0) + '<span class="kpi-unit">' + uH() + '</span></div>' +
+      '<div class="kpi-sec">' + (isIP() ? fmt(m * 1000 / ft2, 1) + ' Btu/h·ft² · ' + fmt(g.htg / 1000, 0) + ' kW' : fmt(g.htg / g.gfa, 1) + ' W/m² · ' + fmt(m, 0) + ' MBH') + '</div>' +
+      deltaHtml(cH, b && capH(b.htg), function (v) { return fmt(v, 0) + ' ' + uH(); }) + '</div>';
     return h + '</div>';
   }
 
@@ -524,21 +571,21 @@
       [['db', a, 'DB'], ['dp', d, 'DP']].forEach(function (x) {
         if (!x[1]) return;
         var bb = bdd && bdd['clg_' + x[0] + '_' + p];
-        bars.push({name: (x[0] === 'db' ? 'Dry-bulb day ' : 'Dew-point day ') + p + '%', short: x[2], v: tons(x[1].total_w * cf),
-          base: bb ? tons(bb.total_w * b.cf) : null, strong: x[0] === gov && p === S.coolPct});
+        bars.push({name: (x[0] === 'db' ? 'Dry-bulb day ' : 'Dew-point day ') + p + '%', short: x[2], v: capC(x[1].total_w * cf),
+          base: bb ? capC(bb.total_w * b.cf) : null, strong: x[0] === gov && p === S.coolPct});
       });
       cg.push({label: p + '%' + (p === S.coolPct ? ' (selected)' : ''), bars: bars});
     });
     var hg = ['99.6', '99'].map(function (p) {
       var r = dd['htg_' + p], bb = bdd && bdd['htg_' + p];
       return {label: p + '%' + (p === S.heatPct ? ' (selected)' : ''), bars: r ? [{name: 'Heating ' + p + '%', short: '',
-        v: mbh(r.total_w * hf), base: bb ? mbh(bb.total_w * b.hf) : null, strong: p === S.heatPct}] : []};
+        v: capH(r.total_w * hf), base: bb ? capH(bb.total_w * b.hf) : null, strong: p === S.heatPct}] : []};
     });
     var h = '<div class="card"><div class="card-head"><div><h2>Peak loads by design condition</h2>' +
       '<p class="sub">Every ASHRAE design day in the station\'s weather file. Cooling is governed by the larger of the dry-bulb (DB) and ' +
       'dew-point (DP) day; the solid bars are the selected condition' + (b ? '; black lines mark the baseline' : '') + '.</p></div></div>';
-    h += '<div class="chart-pair">' + barChart(cg, 'var(--cool)', 'tons', 1, 'Cooling') +
-      barChart(hg, 'var(--heat)', 'MBH', 0, 'Heating', 340) + '</div>';
+    h += '<div class="chart-pair">' + barChart(cg, 'var(--cool)', uC(), isIP() ? 1 : 0, 'Cooling') +
+      barChart(hg, 'var(--heat)', uH(), 0, 'Heating', 340) + '</div>';
     h += '<p class="sub" style="margin:8px 0 0">Monthly peaks need ASHRAE monthly design conditions, which are not in the free DOE weather files. ' +
       'They will show here once that data is loaded.</p></div>';
     return h;
@@ -557,7 +604,7 @@
 
   function breakdownPanel(kind, g, b) {
     var cooling = kind === 'cooling', block = cooling ? g.cBlock : g.hBlock, groups = g.result.groups && g.result.groups[kind];
-    var factor = cooling ? g.cf : g.hf, conv = cooling ? tons : mbh, unit = cooling ? 'tons' : 'MBH', dp = cooling ? 1 : 0;
+    var factor = cooling ? g.cf : g.hf, conv = cooling ? capC : capH, unit = cooling ? uC() : uH(), dp = cooling && isIP() ? 1 : 0;
     var h = '<div class="bd"><h3>' + (cooling ? 'Cooling' : 'Heating') + ' · ' + esc(DD_LABEL[block.key] || block.key) + '</h3>';
     if (!groups) {
       return h + '<p class="sub">' + (g.source === 'energyplus' ? 'This EnergyPlus run did not report load components.' :
@@ -620,7 +667,7 @@
   function breakdownCard(g, b) {
     var h = '<div class="card"><div class="card-head"><div><h2>Where the peak load comes from</h2>' +
       '<p class="sub">Each peak split by source, at the hour the whole building peaks. Slices show each source\'s share; ' +
-      'figures are in tons (cooling) and MBH (heating).' + (b ? ' Coloured figures are the change from the baseline.' : '') + '</p></div></div>';
+      'figures are in ' + (isIP() ? 'tons (cooling) and MBH (heating).' : 'kW.') + (b ? ' Coloured figures are the change from the baseline.' : '') + '</p></div></div>';
     h += '<div class="bd-pair">' + breakdownPanel('cooling', g, b) + breakdownPanel('heating', g, b) + '</div>';
     h += '<p class="sub" style="margin:10px 0 0">Method: the zone part of each peak is split in the proportions of EnergyPlus\'s Zone ' +
       'Component Load Summary; ventilation and heat recovery come from the system at the peak hour. Heating counts sensible loads only.</p></div>';
@@ -676,9 +723,9 @@
     var ep = S.epSens && S.epSens.hash === hash && S.epSens.done ? S.epSens : null;
     var head = '<div class="card"><div class="card-head"><div><h2>Which design choices move the peak most</h2></div>' +
       seg('tzLoad', [['cooling', 'Cooling'], ['heating', 'Heating']], S.tzLoad) + '</div>';
-    var unit = heating ? 'MBH' : 'tons', dp = heating ? 0 : 1;
-    var conv = heating ? sc0.gfa_m2 / 1000 * C.MBH_PER_KW * sc0.heating_sizing_factor
-      : sc0.gfa_m2 / 1000 / C.KW_PER_TON * sc0.cooling_sizing_factor;
+    var unit = heating ? uH() : uC(), dp = heating || !isIP() ? 0 : 1;
+    var conv = heating ? sc0.gfa_m2 / 1000 * (isIP() ? C.MBH_PER_KW : 1) * sc0.heating_sizing_factor
+      : sc0.gfa_m2 / 1000 / (isIP() ? C.KW_PER_TON : 1) * sc0.cooling_sizing_factor;
     var rows = sweepRanges(sc0, def), notes = '', source, basePeak = null;
     if (ep) {
       var b0 = govFromTotals(ep.base, heating);
@@ -872,6 +919,22 @@
     return null;
   }
 
+  // Lever bounds and costs are stored in SI; shown in the selected units.
+  function leverDisp(key, v) {
+    var u = unitOf(key);
+    return isIP() && UNITS[u] ? +toIP(u, v).toFixed(UNITS[u].dp + 1) : +(+v).toFixed(3);
+  }
+  function leverFromDisp(key, v) {
+    var u = unitOf(key), x = parseFloat(v);
+    if (v === '' || isNaN(x)) return v;
+    return isIP() && UNITS[u] ? fromIP(u, x) : x;
+  }
+  function leverCostDisp(key, c) {
+    var u = UNITS[unitOf(key)], x = parseFloat(c);
+    if (c === '' || c === undefined || isNaN(x)) return '';
+    return isIP() && u ? +(x / u.k).toFixed(2) : x;
+  }
+
   function optLevers() {
     var o = S.opt;
     return sweepRanges(S.sc, S.defaults).map(function (r) {
@@ -916,12 +979,12 @@
     levers.forEach(function (l) {
       h += '<tr><td><input type="checkbox" data-opt-on="' + l.key + '"' + (l.on ? ' checked' : '') + '></td><td>' + esc(SWEEP_LABELS[l.key]) + '</td>' +
         '<td class="num">' + sweepValue(l.key, l.v0) + '</td>' +
-        '<td><input class="opt-num" type="number" step="any" data-opt-lo="' + l.key + '" value="' + esc(+l.lo.toFixed(3)) + '" title="Trained range starts at ' + esc(+l.trainedLo.toFixed(3)) + '"></td>' +
-        '<td><input class="opt-num" type="number" step="any" data-opt-hi="' + l.key + '" value="' + esc(+l.hi.toFixed(3)) + '" title="Trained range ends at ' + esc(+l.trainedHi.toFixed(3)) + '"></td>' +
-        '<td><input class="opt-num" type="number" min="0" step="any" data-opt-cost="' + l.key + '" value="' + esc((o.levers[l.key] || {}).cost || '') + '"></td></tr>';
+        '<td><input class="opt-num" type="number" step="any" data-opt-lo="' + l.key + '" value="' + esc(leverDisp(l.key, l.lo)) + '" title="Trained range starts at ' + esc(leverDisp(l.key, l.trainedLo)) + '"></td>' +
+        '<td><input class="opt-num" type="number" step="any" data-opt-hi="' + l.key + '" value="' + esc(leverDisp(l.key, l.hi)) + '" title="Trained range ends at ' + esc(leverDisp(l.key, l.trainedHi)) + '"></td>' +
+        '<td><input class="opt-num" type="number" min="0" step="any" data-opt-cost="' + l.key + '" value="' + esc(leverCostDisp(l.key, (o.levers[l.key] || {}).cost)) + '"></td></tr>';
     });
     h += '</tbody></table></div><p class="sub" style="margin:6px 0 0">Equipment power and occupant density start switched off (they follow ' +
-      'the client\'s use, not the design). Outdoor air starts at the code rate as its lowest value. Values are in the input\'s own units (WWR and heat recovery as fractions). ' +
+      'the client\'s use, not the design). Outdoor air starts at the code rate as its lowest value. Values are in the selected units (WWR and heat recovery as fractions). ' +
       'Cost is your $ for the whole building per unit change of that input; only used for the lowest-cost option.</p></details>';
     h += '<div class="actions"><button class="btn primary" type="button" id="b-opt">Find options</button></div>';
     var res = o.result, key = scenarioHash(S.sc) + '|' + S.coolPct + '|' + S.heatPct;
@@ -935,12 +998,12 @@
       var d = r.describe(pt), x = '<div class="opt-col"><h3>' + esc(title) + '</h3><ul class="opt-moves">';
       var byH = isNaN(parseFloat(o.clg));
       d.moved.forEach(function (mv) {
-        var sv = byH ? mbh(mv.saves.htg) : tons(mv.saves.clg);
+        var sv = byH ? capH(mv.saves.htg) : capC(mv.saves.clg);
         x += '<li><b>' + esc(SWEEP_LABELS[mv.key]) + '</b> ' + sweepValue(mv.key, mv.from) + ' → ' + sweepValue(mv.key, mv.to) +
-          ' <span class="opp-save">' + (sv >= 0 ? '−' : '+') + fmt(Math.abs(sv), byH ? 0 : 1) + (byH ? ' MBH' : ' tons') + '</span></li>';
+          ' <span class="opp-save">' + (sv >= 0 ? '−' : '+') + fmt(Math.abs(sv), byH || !isIP() ? 0 : 1) + ' ' + (byH ? uH() : uC()) + '</span></li>';
       });
-      x += '</ul><div class="opt-res">Cooling ' + fmt(tons(d.result.clg), 1) + ' tons <b class="' + (pct(d.result.clg, b.clg) < 0 ? 'good' : 'bad') + '">' +
-        fmt(pct(d.result.clg, b.clg), 1) + '%</b> · Heating ' + fmt(mbh(d.result.htg), 0) + ' MBH <b class="' + (pct(d.result.htg, b.htg) <= 0 ? 'good' : 'bad') + '">' +
+      x += '</ul><div class="opt-res">Cooling ' + fmt(capC(d.result.clg), isIP() ? 1 : 0) + ' ' + uC() + ' <b class="' + (pct(d.result.clg, b.clg) < 0 ? 'good' : 'bad') + '">' +
+        fmt(pct(d.result.clg, b.clg), 1) + '%</b> · Heating ' + fmt(capH(d.result.htg), 0) + ' ' + uH() + ' <b class="' + (pct(d.result.htg, b.htg) <= 0 ? 'good' : 'bad') + '">' +
         (pct(d.result.htg, b.htg) > 0 ? '+' : '') + fmt(pct(d.result.htg, b.htg), 1) + '%</b>';
       var ct = parseFloat(S.rates.cooling[S.plant.cooling]), cm = parseFloat(S.rates.heating[S.plant.heating]);
       if (!isNaN(ct) || !isNaN(cm)) {
@@ -991,12 +1054,12 @@
     if (key === 'oa_multiplier') return fmt(v, 2) + '× code rate';
     if (key === 'oa_ach') return fmt(v, 1) + ' ACH';
     if (key === 'infiltration_ach') return fmt(v, 2) + ' ACH';
-    if (key === 'lpd_w_m2' || key === 'epd_w_m2') return fmt(v, 1) + ' W/m²';
-    if (key === 't_cool_c' || key === 't_heat_c') return fmt(v, 1) + ' °C';
-    if (key === 'm2_per_person') return fmt(v, 1) + ' m²/person';
+    if (key === 'lpd_w_m2' || key === 'epd_w_m2') return isIP() ? fmt(toIP('W/m2', v), 2) + ' W/ft²' : fmt(v, 1) + ' W/m²';
+    if (key === 't_cool_c' || key === 't_heat_c') return temp(v, 1);
+    if (key === 'm2_per_person') return isIP() ? fmt(toIP('m2/person', v), 0) + ' ft²/person' : fmt(v, 1) + ' m²/person';
     if (key === 'n_floors') return fmt(v, 0) + ' floors';
     if (key === 'north_axis_deg') return fmt(v, 0) + '°';
-    if (key === 'wall_u' || key === 'roof_u' || key === 'win_u') return 'U-' + fmt(v, 2);
+    if (key === 'wall_u' || key === 'roof_u' || key === 'win_u') return isIP() ? 'U-' + fmt(toIP('W/m2-K', v), 3) : 'U-' + fmt(v, 2);
     return fmt(v, 2);
   }
 
@@ -1017,19 +1080,19 @@
     var h = '<div class="card"><h2>Plant cost</h2><p class="sub">Capacity × your installed-cost rate for the plant types chosen under ' +
       '"Plant cost" (left panel). Sizing factors included.</p>';
     if (isNaN(ct) && isNaN(cm)) {
-      return h + '<div class="empty">Enter your $/ton and $/MBH rates under <b>Plant cost</b> to price the plant.</div></div>';
+      return h + '<div class="empty">Enter your ' + (isIP() ? '$/ton and $/MBH' : '$/kW') + ' rates under <b>Plant cost</b> to price the plant.</div></div>';
     }
-    function cell(label, cap, capUnit, rate, rateUnit, bcap) {
+    function cell(label, cap, capUnit, rate, rateUnit, bcap, dcap, drate) {
       if (isNaN(rate)) return '<div class="kpi"><div class="kpi-label">' + esc(label) + '</div><div class="kpi-sec">No rate entered</div></div>';
       var cost = cap * rate, bcost = bcap != null ? bcap * rate : null;
       return '<div class="kpi"><div class="kpi-label">' + esc(label) + '</div><div class="kpi-value">$' + fmt(cost, 0) + '</div>' +
-        '<div class="kpi-sec">' + fmt(cap, capUnit === 'tons' ? 1 : 0) + ' ' + capUnit + ' × $' + fmt(rate, 0) + rateUnit + '</div>' +
+        '<div class="kpi-sec">' + fmt(dcap, capUnit === 'tons' ? 1 : 0) + ' ' + capUnit + ' × $' + fmt(drate, isIP() ? 0 : 2) + rateUnit + '</div>' +
         deltaHtml(cost, bcost, function (v) { return '$' + fmt(v, 0); }) + '</div>';
     }
     var tot = (isNaN(ct) ? 0 : t * ct) + (isNaN(cm) ? 0 : m * cm);
     var btot = b ? (isNaN(ct) ? 0 : tons(b.clg) * ct) + (isNaN(cm) ? 0 : mbh(b.htg) * cm) : null;
-    h += '<div class="kpis">' + cell('Cooling · ' + S.plant.cooling, t, 'tons', ct, '/ton', b && tons(b.clg)) +
-      cell('Heating · ' + S.plant.heating, m, 'MBH', cm, '/MBH', b && mbh(b.htg)) +
+    h += '<div class="kpis">' + cell('Cooling · ' + S.plant.cooling, t, uC(), ct, isIP() ? '/ton' : '/kW', b && tons(b.clg), capC(g.clg), rateToDisp('cooling', ct)) +
+      cell('Heating · ' + S.plant.heating, m, uH(), cm, isIP() ? '/MBH' : '/kW', b && mbh(b.htg), capH(g.htg), rateToDisp('heating', cm)) +
       '<div class="kpi"><div class="kpi-label">Total plant</div><div class="kpi-value">$' + fmt(tot, 0) + '</div>' +
       deltaHtml(tot, btot, function (v) { return '$' + fmt(v, 0); }) + '</div></div>';
     h += '<p class="sub" style="margin:8px 0 0">Linear $/capacity only. Real equipment comes in discrete sizes and redundancy (N+1) steps, ' +
@@ -1125,13 +1188,16 @@
     var site = (t.elec != null && t.gas_kwh != null) ? (t.elec + t.gas_kwh) * KBTU_PER_KWH / ft2 : null;
     h += '<div class="kpis">' +
       '<div class="kpi"><div class="kpi-label">Electricity</div><div class="kpi-value">' + (t.elec != null ? fmt(t.elec / 1000, 0) : '–') + '<span class="kpi-unit">MWh/yr</span></div>' +
-        '<div class="kpi-sec">' + (t.elec != null ? fmt(t.elec / S.sc.gfa_m2, 0) + ' kWh/m²' : 'needs ' + esc(t.missing.filter(function (x) { return x.indexOf('carbon') < 0; }).join(', '))) + '</div></div>' +
-      (S.energy.heatSource === 'gas' ? '<div class="kpi"><div class="kpi-label">Gas</div><div class="kpi-value">' + (t.therms != null ? fmt(t.therms, 0) : '–') +
-        '<span class="kpi-unit">therms/yr</span></div><div class="kpi-sec">' + (t.therms != null ? fmt(t.gas_kwh / 1000, 0) + ' MWh' : 'needs boiler efficiency') + '</div></div>' : '') +
-      '<div class="kpi"><div class="kpi-label">Site EUI</div><div class="kpi-value">' + (site != null ? fmt(site, 1) : '–') + '<span class="kpi-unit">kBtu/ft²·yr</span></div>' +
-        '<div class="kpi-sec">' + (site != null ? fmt(site / KBTU_PER_KWH * C.FT2_PER_M2, 0) + ' kWh/m²·yr' : '') + '</div></div>' +
+        '<div class="kpi-sec">' + (t.elec != null ? (isIP() ? fmt(t.elec / ft2, 1) + ' kWh/ft²' : fmt(t.elec / S.sc.gfa_m2, 0) + ' kWh/m²') : 'needs ' + esc(t.missing.filter(function (x) { return x.indexOf('carbon') < 0; }).join(', '))) + '</div></div>' +
+      (S.energy.heatSource === 'gas' ? '<div class="kpi"><div class="kpi-label">Gas</div><div class="kpi-value">' +
+        (t.therms != null ? (isIP() ? fmt(t.therms, 0) : fmt(t.gas_kwh / 1000, 0)) : '–') +
+        '<span class="kpi-unit">' + (isIP() ? 'therms/yr' : 'MWh/yr') + '</span></div><div class="kpi-sec">' +
+        (t.therms != null ? (isIP() ? fmt(t.gas_kwh / 1000, 0) + ' MWh' : fmt(t.therms, 0) + ' therms') : 'needs boiler efficiency') + '</div></div>' : '') +
+      '<div class="kpi"><div class="kpi-label">Site EUI</div><div class="kpi-value">' +
+        (site != null ? (isIP() ? fmt(site, 1) : fmt(site / KBTU_PER_KWH * C.FT2_PER_M2, 0)) : '–') + '<span class="kpi-unit">' + (isIP() ? 'kBtu/ft²·yr' : 'kWh/m²·yr') + '</span></div>' +
+        '<div class="kpi-sec">' + (site != null ? (isIP() ? fmt(site / KBTU_PER_KWH * C.FT2_PER_M2, 0) + ' kWh/m²·yr' : fmt(site, 1) + ' kBtu/ft²·yr') : '') + '</div></div>' +
       '<div class="kpi"><div class="kpi-label">Operational carbon</div><div class="kpi-value">' + (t.co2 != null ? fmt(t.co2 / 1000, 0) : '–') + '<span class="kpi-unit">t CO₂e/yr</span></div>' +
-        '<div class="kpi-sec">' + (t.co2 != null ? fmt(t.co2 / S.sc.gfa_m2, 1) + ' kg/m²' : 'needs ' + esc(t.missing.join(', '))) + '</div></div></div>';
+        '<div class="kpi-sec">' + (t.co2 != null ? (isIP() ? fmt(t.co2 / ft2, 2) + ' kg/ft²' : fmt(t.co2 / S.sc.gfa_m2, 1) + ' kg/m²') : 'needs ' + esc(t.missing.join(', '))) + '</div></div></div>';
     var siteSeries = t.elec != null && t.gas_kwh != null;
     var series = siteSeries ? [
       {key: 'heating_el', label: 'Heating (electric)', color: 'var(--heat)'}, {key: 'gas_kwh', label: 'Heating (gas)', color: 'var(--heat-2)'},
@@ -1180,9 +1246,10 @@
         '<div class="kpi-sec">' + fmt(g.clgSens / 1000, 0) + ' kW sensible · ' + fmt(g.clgLat / 1000, 0) + ' kW latent</div></div>';
     }
     if (cfm != null) {
-      h += '<div class="kpi"><div class="kpi-label">Supply air at cooling peak</div><div class="kpi-value">' + fmt(cfm, 0) + '<span class="kpi-unit">cfm</span></div>' +
-        '<div class="kpi-sec">' + fmt(cfm / ft2, 2) + ' cfm/ft² · ' + fmt(g.supply * 1000, 0) + ' L/s</div>' +
-        deltaHtml(cfm, b && b.supply != null ? b.supply * C.CFM_PER_M3S : null, function (v) { return fmt(v, 0) + ' cfm'; }) + '</div>';
+      var air = function (m3s) { return isIP() ? m3s * C.CFM_PER_M3S : m3s * 1000; }, au = isIP() ? 'cfm' : 'L/s';
+      h += '<div class="kpi"><div class="kpi-label">Supply air at cooling peak</div><div class="kpi-value">' + fmt(air(g.supply), 0) + '<span class="kpi-unit">' + au + '</span></div>' +
+        '<div class="kpi-sec">' + (isIP() ? fmt(cfm / ft2, 2) + ' cfm/ft² · ' + fmt(g.supply * 1000, 0) + ' L/s' : fmt(g.supply * 1000 / g.gfa, 2) + ' L/s·m² · ' + fmt(cfm, 0) + ' cfm') + '</div>' +
+        deltaHtml(air(g.supply), b && b.supply != null ? air(b.supply) : null, function (v) { return fmt(v, 0) + ' ' + au; }) + '</div>';
     }
     if (g.clgOA != null && g.clgRaw) {
       // EnergyPlus reports the outdoor-air load before heat recovery; the
@@ -1203,18 +1270,18 @@
       return '<tr><td>' + label + '</td><td class="num">' + (b ? fmt(bb, d) : '') + '</td><td class="num">' + fmt(c, d) + '</td>' +
         '<td class="num">' + (b && dd != null ? (dd > 0 ? '+' : '') + fmt(dd, d) : '') + '</td></tr>';
     }
-    var kw = function (w) { return w / 1000; }, cfm = function (m) { return m * C.CFM_PER_M3S; };
+    var kw = function (w) { return w / 1000; }, cfm = function (m) { return isIP() ? m * C.CFM_PER_M3S : m * 1000; };
     var h = '<div class="scroll-x" style="margin-top:14px"><table class="t"><thead><tr><th>Metric</th><th>' + (b ? 'Baseline' : '') +
       '</th><th>Current</th><th>' + (b ? 'Δ' : '') + '</th></tr></thead><tbody>';
-    h += row('Cooling, block (tons)', g.clg, b && b.clg, tons, 1);
+    h += row('Cooling, block (' + uC() + ')', g.clg, b && b.clg, capC, 1);
     h += row('Cooling, sensible (kW)', g.clgSens, b && b.clgSens, kw, 1);
     h += row('Cooling, latent (kW)', g.clgLat, b && b.clgLat, kw, 1);
     h += row('Ventilation load before heat recovery (kW)', g.clgOA, b && b.clgOA, kw, 1);
     h += row('Recovered by heat recovery (kW)', g.clgHR, b && b.clgHR, kw, 1);
-    h += row('Cooling, sum of zone peaks (tons)', g.clgSop, b && b.clgSop, tons, 1);
-    h += row('Supply air at cooling peak (cfm)', g.supply, b && b.supply, cfm, 0);
-    h += row('Heating, block (MBH)', g.htg, b && b.htg, mbh, 0);
-    h += row('Heating, sum of zone peaks (MBH)', g.htgSop, b && b.htgSop, mbh, 0);
+    h += row('Cooling, sum of zone peaks (' + uC() + ')', g.clgSop, b && b.clgSop, capC, 1);
+    h += row('Supply air at cooling peak (' + (isIP() ? 'cfm' : 'L/s') + ')', g.supply, b && b.supply, cfm, 0);
+    h += row('Heating, block (' + uH() + ')', g.htg, b && b.htg, capH, 0);
+    h += row('Heating, sum of zone peaks (' + uH() + ')', g.htgSop, b && b.htgSop, capH, 0);
     return h + '</tbody></table></div>';
   }
 
@@ -1225,8 +1292,8 @@
       if (!r) return '';
       var hum = r.mcwb_c != null ? r.mcwb_c : r.dp_c;
       return '<tr' + (sel ? ' class="sel"' : '') + '><td>' + DD_LABEL[key] + '</td>' +
-        '<td class="num">' + fmt(r.db_c, 1) + ' °C / ' + fmt(r.db_c * 9 / 5 + 32, 1) + ' °F</td>' +
-        '<td class="num">' + (hum == null ? '–' : fmt(hum, 1) + ' °C / ' + fmt(hum * 9 / 5 + 32, 1) + ' °F') + '</td>' +
+        '<td class="num">' + temp(r.db_c, 1) + '</td>' +
+        '<td class="num">' + (hum == null ? '–' : temp(hum, 1)) + '</td>' +
         '<td class="num">' + (r.db_range_c ? fmt(r.db_range_c, 1) + ' K' : '–') + '</td>' +
         '<td class="num">' + r.month + '/' + r.day + '</td></tr>';
     }
@@ -1267,7 +1334,7 @@
     var msgs = run.messages || {};
     if (msgs.severe) h += '<div class="note bad">' + msgs.severe + ' severe EnergyPlus message(s). Review before using: ' + esc((msgs.severe_messages || []).slice(0, 3).join(' | ')) + '</div>';
     h += '<p class="sub">Governing cooling day: <b>' + esc(DD_LABEL[g.cKey] || g.cKey) + '</b>, peak hour ending ' + esc(g.time || '–') +
-      ' (outdoor ' + fmt(g.oat, 1) + ' °C). Governing heating day: <b>' + esc(DD_LABEL[g.hKey] || g.hKey) + '</b>. ' +
+      ' (outdoor ' + temp(g.oat, 1) + '). Governing heating day: <b>' + esc(DD_LABEL[g.hKey] || g.hKey) + '</b>. ' +
       (msgs.warnings || 0) + ' EnergyPlus warnings.</p>';
     h += '<p class="sub">Peaks are one-hour averages, as hourly design-day load methods report them. Highest single 10-minute value: cooling ' +
       fmt((g.clgTs || 0) / 1000, 0) + ' kW at ' + esc(g.clgTsTime || '–') + ', heating ' + fmt((g.htgTs || 0) / 1000, 0) + ' kW at ' +
@@ -1287,10 +1354,10 @@
       h += '</tbody></table></div><p class="sub" style="margin-top:6px">From EnergyPlus\'s Zone Component Load Summary. Excludes the outdoor-air load handled by the system.</p>';
     }
     if (run.zone_sizing && run.zone_sizing.length) {
-      h += '<h3>Zone sizing (per zone, unscaled)</h3><div class="scroll-x"><table class="t"><thead><tr><th>Zone</th><th>×</th><th>Load</th><th>Design load (kW)</th><th>Airflow (cfm)</th><th>Peak</th><th>Design day</th></tr></thead><tbody>';
+      h += '<h3>Zone sizing (per zone, unscaled)</h3><div class="scroll-x"><table class="t"><thead><tr><th>Zone</th><th>×</th><th>Load</th><th>Design load (' + (isIP() ? 'MBH' : 'kW') + ')</th><th>Airflow (' + (isIP() ? 'cfm' : 'L/s') + ')</th><th>Peak</th><th>Design day</th></tr></thead><tbody>';
       run.zone_sizing.forEach(function (z) {
         h += '<tr><td>' + esc(z.ZoneName) + '</td><td class="num">' + z.scale + '</td><td>' + esc(z.LoadType || '') + '</td><td class="num">' +
-          fmt((z.CalcDesLoad || 0) / 1000, 1) + '</td><td class="num">' + fmt((z.CalcDesFlow || 0) * C.CFM_PER_M3S, 0) + '</td><td>' +
+          fmt((z.CalcDesLoad || 0) / 1000 * (isIP() ? C.MBH_PER_KW : 1), 1) + '</td><td class="num">' + fmt((z.CalcDesFlow || 0) * (isIP() ? C.CFM_PER_M3S : 1000), 0) + '</td><td>' +
           esc(z.PeakHrMin || '') + '</td><td>' + esc(z.DesDayName || '') + '</td></tr>';
       });
       h += '</tbody></table></div>';
@@ -1388,9 +1455,13 @@
   function onInput(e) {
     var t = e.target;
     var en = t.id && t.id.match(/^f-e-(\w+)$/);
-    if (en && en[1] !== 'heatSource') { S.energy[en[1]] = t.value; renderResults(); save(); return; }
+    if (en && en[1] !== 'heatSource') {
+      var ev = t.value;
+      if (en[1] === 'sfp' && isIP() && ev !== '' && !isNaN(parseFloat(ev))) ev = +fromIP('W/(L/s)', parseFloat(ev)).toFixed(6);
+      S.energy[en[1]] = ev; renderResults(); save(); return;
+    }
     var rate = t.id && t.id.match(/^f-rate-(cooling|heating)$/);
-    if (rate) { S.rates[rate[1]][S.plant[rate[1]]] = t.value; renderResults(); save(); return; }
+    if (rate) { S.rates[rate[1]][S.plant[rate[1]]] = rateFromDisp(rate[1], t.value); renderResults(); save(); return; }
     var k = t.getAttribute('data-k');
     if (!k) return;
     var spec = D.fields[k] || {}, unit = unitOf(k);
@@ -1401,12 +1472,17 @@
     if (t.type === 'checkbox') { S.sc[k] = t.checked; hintEl(); render(); return; }
     if (t.value === '' && spec.nullable) { S.sc[k] = null; t.classList.remove('bad'); hintEl(); render(); return; }
     var v = parseFloat(t.value);
-    var ok = !isNaN(v) && (spec.min === undefined || (v >= spec.min && v <= spec.max));
+    if (!isNaN(v) && isIP() && UNITS[unit]) {
+      // Typing back the shown default restores the exact SI default.
+      var d0 = S.defaults[k];
+      v = d0 != null && Math.abs(toDisp(unit, d0) - v) < 1e-9 ? d0 : +fromIP(unit, v).toFixed(6);
+    }
+    var ok = !isNaN(v) && (spec.min === undefined || (v >= spec.min - 1e-9 && v <= spec.max + 1e-9));
     t.classList.toggle('bad', !ok);
     if (!ok) return;
     S.sc[k] = spec.int ? Math.round(v) : v;
     var ip = document.querySelector('[data-ip="' + k + '"]');
-    if (ip && IP[unit]) ip.textContent = IP[unit](v);
+    if (ip) ip.textContent = otherUnits(unit, v);
     hintEl();
     render();
   }
@@ -1431,6 +1507,7 @@
     var sg = t.parentNode.getAttribute && t.parentNode.getAttribute('data-seg');
     if (sg) { S[sg] = t.getAttribute('data-v'); render(); return; }
     if (t.getAttribute('data-tab')) { S.tab = t.getAttribute('data-tab'); render(); return; }
+    if (t.getAttribute('data-units')) { S.units = t.getAttribute('data-units'); renderStatus(); renderInputs(); render(); save(); return; }
     if (t.id === 'b-reset') { S.sc = null; S.czOverride = null; resetScenario(); renderInputs(); render(); }
     else if (t.id === 'b-run') runEnergyPlus();
     else if (t.id === 'b-annual') runAnnual();
@@ -1475,9 +1552,12 @@
     if (t.id === 'f-opt-clg') o.clg = t.value;
     else if (t.id === 'f-opt-htg') o.htg = t.value;
     else if ((k = t.getAttribute('data-opt-on'))) (o.levers[k] = o.levers[k] || {}).on = t.checked;
-    else if ((k = t.getAttribute('data-opt-lo'))) (o.levers[k] = o.levers[k] || {}).lo = t.value;
-    else if ((k = t.getAttribute('data-opt-hi'))) (o.levers[k] = o.levers[k] || {}).hi = t.value;
-    else if ((k = t.getAttribute('data-opt-cost'))) (o.levers[k] = o.levers[k] || {}).cost = t.value;
+    else if ((k = t.getAttribute('data-opt-lo'))) (o.levers[k] = o.levers[k] || {}).lo = leverFromDisp(k, t.value);
+    else if ((k = t.getAttribute('data-opt-hi'))) (o.levers[k] = o.levers[k] || {}).hi = leverFromDisp(k, t.value);
+    else if ((k = t.getAttribute('data-opt-cost'))) {
+      var cv = parseFloat(t.value), lu = UNITS[unitOf(k)];
+      (o.levers[k] = o.levers[k] || {}).cost = isNaN(cv) ? '' : (isIP() && lu ? cv * lu.k : cv);   // stored per SI unit
+    }
   }
   resultsEl.addEventListener('input', onOptInput);
   resultsEl.addEventListener('change', onOptInput);
