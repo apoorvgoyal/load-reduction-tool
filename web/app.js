@@ -447,7 +447,7 @@
   // ── Rendering: shared pieces ────────────────────────────────────────────
   function unitsToggle() {
     return '<div class="units-toggle" role="group" aria-label="Units">' +
-      '<button type="button" data-units="ip" aria-pressed="' + isIP() + '"' + (isIP() ? ' class="on"' : '') + '>US units</button>' +
+      '<button type="button" data-units="ip" aria-pressed="' + isIP() + '"' + (isIP() ? ' class="on"' : '') + '>Imperial</button>' +
       '<button type="button" data-units="si" aria-pressed="' + !isIP() + '"' + (!isIP() ? ' class="on"' : '') + '>Metric</button></div>';
   }
   function renderStatus() { document.getElementById('status').innerHTML = unitsToggle(); }
@@ -1001,9 +1001,9 @@
       if (ap) {
         var epNow = S.ep && S.ep.hash === scenarioHash(S.sc);
         return h + '<div class="gc-c"><span class="pstat ok">✓ Plan applied to your answers</span><p class="sub">' +
-          (S.running ? 'EnergyPlus is checking it now; the results above update when it finishes.' :
-            epNow ? 'Checked in EnergyPlus: the results above are a full simulation of your answers with this plan.' :
-            'The results above include these changes. Select Run full simulation to check them in EnergyPlus.') +
+          (S.running ? 'EnergyPlus is running; the results above update when it finishes.' :
+            epNow ? 'The results above are a full EnergyPlus simulation of your answers with this plan.' :
+            'The results above include these changes. Select Run full simulation at the top to check them in EnergyPlus.') +
           ' To look for a different plan, change a goal and select Update plan.</p></div><div class="gc-d">' + ap.list + '</div></div>' + eng + '</details></section>';
       }
       return h + '<div class="gc-c"><span class="pstat no">Your answers changed since this plan. Select Update plan.</span></div></div>' + eng + '</details></section>';
@@ -1030,9 +1030,8 @@
     o.lastList = list;
     h += '<div class="gc-c"><span class="pstat ' + (okC && okH ? 'ok' : 'no') + '">' + esc(status) + '</span>' +
       (plans.length > 1 ? seg('planPick', plans.map(function (x) { return [x[0], x[1]]; }), pick[0]) : '') +
-      '<div class="actions"><button class="btn" type="button" data-opt-apply="' + esc(pick[1]) + '">Apply plan (' + d.moved.length + ' change' + (d.moved.length === 1 ? '' : 's') + ')</button>' +
-      '<button class="btn secondary" type="button" data-opt-apply-run="' + esc(pick[1]) + '">Check in EnergyPlus · 1 run</button></div>' +
-      '<p class="sub">Check in EnergyPlus applies the plan and runs a full simulation of it.</p></div><div class="gc-d">' + list + '</div></div>';
+      '<div class="actions"><button class="btn" type="button" data-opt-apply="' + esc(pick[1]) + '">Apply plan (' + d.moved.length + ' change' + (d.moved.length === 1 ? '' : 's') + ')</button></div>' +
+      '</div><div class="gc-d">' + list + '</div></div>';
     // For engineers: the best result with 1, 2, 3 … changes.
     var prevPc = null, met = false, byH = !wantC;
     eng += '<h3>How far you can get by changing 1, 2, 3 … things</h3><ol class="opt-count">';
@@ -1388,6 +1387,7 @@
         var yi = pin ? pin.scrollTop : 0, po = document.getElementById('pane-out'), yo = po ? po.scrollTop : 0;
         el.innerHTML = workspaceView();
         if (pin) { document.getElementById('pane-in').scrollTop = yi; document.getElementById('pane-out').scrollTop = yo; }
+        watchPeaks();
       } else if (S.rightOnly) refreshRight();
       else refreshInputs();
       S.rebuild = false; S.rightOnly = false;
@@ -1764,10 +1764,16 @@
     if (!(r > 0) || w == null) return null;
     return (kind === 'cooling' ? tons(w) : mbh(w)) * r;
   }
+  // " on 21 July": the date of the station's design day that sets this peak.
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  function ddDate(key) {
+    var st = stationById(S.station), r = key && st && st.design_days && st.design_days[key];
+    return r && r.month ? ' on ' + r.day + ' ' + MONTHS[r.month - 1] : '';
+  }
   function answerCardV3(kind, g, ref, refName) {
     var cool = kind === 'cooling', cls = cool ? 'cool' : 'heat';
     var h = '<article class="acard ' + cls + (g ? '' : ' grey') + '"><div class="ac-left"><div class="ac-label">' + (cool ? SNOW : FLAME) +
-      (cool ? 'Cooling equipment needed' : 'Heating equipment needed') + '</div>';
+      (cool ? 'Cooling' : 'Heating') + ' peak load' + ddDate(g && (cool ? g.cKey : g.hKey)) + '</div>';
     if (!g) {
       return h + '<div class="ac-num">—<span>' + (cool ? uC() : uH()) + '</span></div><p class="ac-when">Run a full simulation to get this number.</p></div>' +
         '<div class="ac-right"><div class="ac-rt">Where it comes from</div><p class="sub">Appears with the result.</p></div></article>';
@@ -1789,6 +1795,27 @@
     return '<div class="cond"><span class="cond-l" id="cond-' + kind + '">' + (cool ? 'Cooling' : 'Heating') + '</span>' +
       seg(cool ? 'coolPct' : 'heatPct', cool ? [['0.4', '0.4%'], ['1', '1%'], ['2', '2%']] : [['99.6', '99.6%'], ['99', '99%']], cool ? S.coolPct : S.heatPct)
         .replace('class="seg"', 'class="seg mini" role="group" aria-labelledby="cond-' + kind + '"') + '</div>';
+  }
+  // Compact copies of the two answer cards, pinned under the results header
+  // once the full cards have scrolled away (shown by watchPeaks).
+  function peaksPinned(g, ref, refName) {
+    function one(kind) {
+      var cool = kind === 'cooling', w = cool ? g.clg : g.htg, v = cool ? capC(w) : capH(w), dp = cool && isIP() ? 1 : 0, unit = cool ? uC() : uH();
+      var chip = '';
+      if (ref) {
+        var d = v - (cool ? capC(ref.clg) : capH(ref.htg));
+        chip = Math.abs(d) < Math.pow(10, -dp) / 2 ? '' : '<span class="dchip ' + (d < 0 ? 'down' : 'up') + '">' + (d < 0 ? '▼ ' : '▲ ') + fmt(Math.abs(d), dp) + ' vs ' + refName + '</span>';
+      }
+      var bd = groupedBreakdown(kind, g), bar = '';
+      if (bd) {
+        var gross = bd.parts.reduce(function (t, x) { return t + x.w; }, 0);
+        bar = '<div class="stack thin">' + bd.parts.map(function (x) {
+          return '<span style="width:' + (x.w / gross * 100) + '%;background:' + x.shade + '" title="' + esc(x.label) + ' ' + fmt(x.w / gross * 100, 0) + '%"></span>'; }).join('') + '</div>';
+      }
+      return '<div class="pin ' + (cool ? 'cool' : 'heat') + '"><div class="pin-top"><span class="pin-l">' + (cool ? SNOW + 'Cooling' : FLAME + 'Heating') + '</span>' +
+        '<span class="pin-n">' + fmt(v, dp) + '<em>' + unit + '</em></span>' + chip + '</div>' + bar + '</div>';
+    }
+    return '<div class="rp-pins" aria-hidden="true">' + one('cooling') + one('heating') + '</div>';
   }
   function factorsMissing() {
     var E = S.energy, ok = function (v) { return parseFloat(v) > 0; }, m = [];
@@ -1852,9 +1879,11 @@
     var h = '<div class="wrap rp"><div class="rp-head"><h2 class="rp-title">Results</h2>' +
       (g ? '<span class="badge-src ' + (ep ? 'ep' : 'sur') + '">' + (ep ? 'Full simulation · EnergyPlus' : 'Instant estimate' +
         (ho && ho.worst_governing_p95_pct != null ? ' · within ~' + fmt(Math.ceil(ho.worst_governing_p95_pct), 0) + '%' : '')) + '</span>' : '<span class="badge-src none">No instant estimate</span>') +
-      '<span class="tot">Total equipment cost: <b>' + tot + '</b></span><span class="ws-sp"></span>' +
+      '<span class="tot">Total equipment cost: <b>' + tot + '</b></span>' +
+      '<span class="ws-sp"></span>' +
       '<button type="button" class="btn" id="b-run"' + (engineOn && !S.running ? '' : ' disabled') + '>' +
-      (S.running ? esc(S.engineMsg || 'Running EnergyPlus…') : (ep ? 'Re-run full simulation' : 'Run full simulation · ~4 sec')) + '</button></div>';
+      (S.running ? esc(S.engineMsg || 'Running EnergyPlus…') : (ep ? 'Re-run full simulation' : 'Run full simulation · ~4 sec')) + '</button>' +
+      (g ? peaksPinned(g, ref, refName) : '') + '</div>';
     if (!engineOn) h += '<p class="sub">' + esc((S.engine && S.engine.reason) || '') + '</p>';
     if (S.runError) h += '<div class="note bad">' + esc(S.runError) + '</div>';
     if (g) {
@@ -1862,15 +1891,24 @@
       if (g.cf !== 1 || g.hf !== 1) h += '<div class="note info">Includes sizing factors: cooling ×' + fmt(g.cf, 2) + ', heating ×' + fmt(g.hf, 2) + '.</div>';
       if (b && b.source !== g.source) h += '<div class="note warn">Your baseline and these results come from different sources (' + b.source + ' vs ' + g.source + '). Compare like with like before quoting the difference.</div>';
     } else h += '<div class="note warn">' + noResultHtml(res) + '</div>';
-    h += answerCardV3('cooling', g, ref, refName) + answerCardV3('heating', g, ref, refName);
-    h += '<details class="gloss-q"><summary>What do tons and MBH mean?</summary><dl class="gloss">' +
-      '<dt>Ton (of cooling)</dt><dd>12,000 Btu per hour, or 3.517 kW: the usual US unit for cooling equipment size.</dd>' +
-      '<dt>MBH</dt><dd>1,000 Btu per hour, or 0.293 kW: the usual US unit for heating equipment size.</dd>' +
-      '<dt>Peak</dt><dd>The most heating or cooling needed in any one hour on an extreme design day. The equipment is sized for it.</dd></dl></details>';
-    h += sensitivityCard('list');
-    if (g) h += optimizerCard(g);
-    h += yearlyCard();
-    h += '<details class="card eng" id="eng"' + (S.open.eng ? ' open' : '') + '><summary><h2>For engineers: detailed data</h2>' +
+    // Each section sits in a row with a brief explanation beside it (below it when the pane is narrow).
+    function row(main, title, text) {
+      return '<div class="rrow"><div class="rrow-main">' + main + '</div><aside class="rrow-note"><h3>' + esc(title) + '</h3>' + text + '</aside></div>';
+    }
+    h += row(answerCardV3('cooling', g, ref, refName) + answerCardV3('heating', g, ref, refName), 'Equipment needed',
+      '<p>The most cooling or heating the building needs in any one hour on an extreme design day. The equipment is sized for it.</p>' +
+      '<p><b>Ton:</b> 12,000 Btu/h (3.517 kW) of cooling. <b>MBH:</b> 1,000 Btu/h (0.293 kW) of heating.</p>' +
+      '<p><b>Where it comes from</b> splits each peak by source at the hour the building peaks.</p>');
+    h += row(sensitivityCard('list'), 'Biggest ways to shrink it',
+      '<p>Each input moved, on its own, to the end of its realistic range that lowers the peak. Savings don\'t simply add up when combined.</p>' +
+      '<p><b>Apply</b> sets the change on the left.</p>');
+    if (g) h += row(optimizerCard(g), 'Set a goal',
+      '<p>Enter how much smaller you want each peak. The tool searches combinations of changes in the trained model and suggests a plan.</p>' +
+      '<p><b>Apply plan</b> sets them on the left; then Run full simulation to check it in EnergyPlus.</p>');
+    h += row(yearlyCard(), 'Yearly energy & carbon',
+      '<p>A full-year EnergyPlus run on the location\'s typical-year weather.</p>' +
+      '<p>Your efficiencies and carbon factors turn the heating and cooling into fuel and carbon; the tool has none built in.</p>');
+    h += '<div class="rrow"><div class="rrow-main"><details class="card eng" id="eng"' + (S.open.eng ? ' open' : '') + '><summary><h2>For engineers: detailed data</h2>' +
       '<span class="sub">Design conditions, airflow, outdoor-air loads, every design day, profiles, zone sizing, defaults, the two-sided sensitivity chart, yearly end uses and downloads.</span></summary>' +
       '<div class="cond-row"><span class="cond-t">Design condition</span>' + condPicker('cooling') + condPicker('heating') + '</div>' +
       '<p class="sub">How extreme a design day the equipment is sized for. Applies to every result on this page.</p>';
@@ -1879,7 +1917,9 @@
       h += designDayCard(g, b);
       if (ep) h += energyplusCard(res, g);
     }
-    h += sensitivityCard('tech') + annualTable() + designConditionsCard() + assumptionsCard() + '</details>';
+    h += sensitivityCard('tech') + annualTable() + designConditionsCard() + assumptionsCard() + '</details></div>' +
+      '<aside class="rrow-note"><h3>For engineers</h3><p>The design condition (how extreme a design day to size for), airflow, ventilation loads, every design day, ' +
+      'zone sizing, defaults still to be verified, and IDF and results downloads.</p></aside></div>';
     return h + '</div>';
   }
   function refreshRight() {
@@ -1887,7 +1927,18 @@
     if (po) { var y = po.scrollTop; po.innerHTML = rightPane(); po.scrollTop = y; }
     var tl = document.getElementById('tab-results');
     if (tl) tl.textContent = tabLabel();
+    watchPeaks();
   }
+  // The results header stays at the top of the pane; once the answer cards
+  // have scrolled away it also shows the two peaks, so they stay in view.
+  function watchPeaks() {
+    var head = document.querySelector('.rp-head'), card = document.querySelector('.acard.cool');
+    if (!head || !card) return;
+    // Pin as soon as the cooling card (the first) has passed under the header,
+    // so both peaks are in view before the reader reaches the next section.
+    head.classList.toggle('stuck', card.getBoundingClientRect().bottom < head.getBoundingClientRect().bottom + 8);
+  }
+
   function refreshInputs() {
     SECTIONS.concat([COST_SEC]).forEach(function (sec) { var st = sectionStatus(sec); setStatus(sec.id, st); });
     Object.keys(S.custom).forEach(function (k) {
@@ -2121,16 +2172,17 @@
     else if (t.id === 'b-annual') runAnnual();
     else if (t.id === 'b-epsens') runEpSweep();
     else if (t.id === 'b-opt') { t.disabled = true; t.textContent = 'Searching…'; setTimeout(function () { runOptimizer(); render(); }, 20); }
-    else if (t.getAttribute('data-opt-apply') || t.getAttribute('data-opt-apply-run')) {
-      var vals = S.opt.picks[t.getAttribute('data-opt-apply') || t.getAttribute('data-opt-apply-run')];
+    else if (t.getAttribute('data-opt-apply')) {
+      var vals = S.opt.picks[t.getAttribute('data-opt-apply')];
       if (vals) {
         var ch = Object.keys(vals).filter(function (k) { return Math.abs(vals[k] - leverValueNow(k)) > 1e-12; })
           .map(function (k) { return {key: k, v: vals[k]}; });
-        var list = S.opt.lastList;
+        // Record the applied plan before the page redraws, so the card shows
+        // "Plan applied" straight away rather than "out of date".
+        var after = S.sc;
+        ch.forEach(function (c) { after = sweepScenario(after, S.defaults, c.key, c.v); });
+        S.opt.applied = {hash: scenarioHash(after) + '|' + S.coolPct + '|' + S.heatPct, list: S.opt.lastList};
         applyChanges(ch);
-        S.opt.applied = {hash: scenarioHash(S.sc) + '|' + S.coolPct + '|' + S.heatPct, list: list};
-        if (t.getAttribute('data-opt-apply-run') && S.engine && S.engine.available) runEnergyPlus();
-        else render();
       }
     }
     else if (t.id === 'b-base') {
@@ -2172,6 +2224,9 @@
     onClick(e);
   });
   window.addEventListener('hashchange', route);
+  // Results pane scrolls on its own on desktop, with the page on a phone.
+  document.addEventListener('scroll', function () { watchPeaks(); }, true);
+  window.addEventListener('resize', function () { watchPeaks(); });
   // Optimizer inputs live in the results panel: store them without
   // re-rendering, so typing keeps focus; the search runs on "Find options".
   function onOptInput(e) {

@@ -787,3 +787,64 @@ details.factors .field input, details.factors .field select { font: 600 15px var
 .gc-d ul.checklist li { grid-template-columns: 26px minmax(0, 1fr) auto auto; gap: 6px 18px; }
 .gc-c { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
 .gc-c .sub { flex-basis: 100%; }
+
+/* Results header: fixed at the top of the results pane; shows the peaks once the cards scroll away */
+.rp-head { position: sticky; top: 0; z-index: 3; background: var(--ground); margin: -20px -24px 0; padding: 14px 24px 12px;
+  border-bottom: 1px solid transparent; }
+.rp-head.stuck { border-bottom-color: var(--line); }
+.rp-mini { display: none; align-items: center; gap: 14px; font-weight: 800; font-size: 17px; font-variant-numeric: tabular-nums; }
+.rp-mini span { display: inline-flex; align-items: center; gap: 6px; }
+.rp-mini .cool { color: var(--cool-ink); } .rp-mini .heat { color: var(--heat-ink); }
+.rp-head.stuck .rp-mini { display: inline-flex; }
+@media (max-width: 900px) {
+  .rp-head { top: 48px; margin: -16px -12px 0; padding: 10px 12px; }
+}
+@media (max-width: 900px) {
+  .rp-head.stuck .tot, .rp-head.stuck .badge-src { display: none; }
+  .rp-head.stuck .rp-title { font-size: 18px; }
+  .rp-head.stuck .btn { min-height: 44px; padding: 0 12px; font-size: 14px; }
+}
+@media (max-width: 600px) {
+  ol.ranked li { grid-template-columns: 32px minmax(0, 1fr) auto; }
+  ol.ranked li .rk-text { grid-column: 2 / -1; }
+  ol.ranked li .rk-bar { grid-column: 2 / -1; }
+  ol.ranked li .rk-val { grid-column: 2; flex-direction: row; align-items: baseline; gap: 8px; justify-self: start; }
+  ol.ranked li .btn { grid-column: 3; justify-self: end; }
+}
+
+/* Results rows: a section with a brief explanation beside it (below it when the pane is narrow) */
+.pane-out { container-type: inline-size; }
+.rp { max-width: 1480px; }
+.rrow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.rrow-main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.rrow-note { border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); padding: 12px 14px;
+  font-size: 13px; color: var(--muted); align-self: start; }
+.rrow-note h3 { margin: 0 0 4px; font-size: 13px; font-weight: 800; color: var(--ink); text-transform: uppercase; letter-spacing: .05em; }
+.rrow-note p { margin: 0 0 6px; } .rrow-note p:last-child { margin-bottom: 0; }
+.rrow-note b { color: var(--ink); }
+@container (min-width: 820px) {
+  .rrow { grid-template-columns: minmax(0, 1fr) 250px; gap: 16px; }
+}
+
+/* Pinned compact answer cards: hang below the sticky header, out of the flow (no layout jump) */
+.rp-pins { display: none; position: absolute; left: 0; right: 0; top: 100%; padding: 8px 24px 10px; background: var(--ground);
+  border-bottom: 1px solid var(--line); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.rp-head.stuck .rp-pins { display: grid; }
+.rp-head.stuck { border-bottom-color: transparent; }
+.pin { background: var(--surface); border: 1px solid var(--line); border-left-width: 5px; border-radius: var(--radius-card); padding: 8px 12px;
+  display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pin.cool { border-left-color: var(--cool); } .pin.heat { border-left-color: var(--heat); }
+.pin-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.pin-l { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; font-size: 13px; }
+.pin.cool .pin-l { color: var(--cool-ink); } .pin.heat .pin-l { color: var(--heat-ink); }
+.pin-n { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.pin-n em { font-style: normal; font-size: 13px; font-weight: 700; color: var(--muted); margin-left: 4px; }
+.pin .dchip { font-size: 12px; padding: 1px 8px; }
+.stack.thin { height: 8px; }
+.rp-mini { display: none !important; }
+@media (max-width: 900px) {
+  .rp-pins { padding: 6px 12px 8px; gap: 8px; }
+  .pin { padding: 6px 8px; }
+  .pin-n { font-size: 19px; }
+  .pin .dchip { display: none; }
+}
