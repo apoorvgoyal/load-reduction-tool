@@ -1380,14 +1380,18 @@
   function render() { renderStatus(); renderView(); save(); }
 
   // ── Views (hash routing: #start, #inputs, #results) ─────────────────────
-  var VIEWS = ['start', 'inputs', 'results'];
+  var VIEWS = ['start', 'workspace'];
   function currentView() {
     var v = (location.hash || '').replace('#', '');
+    if (v === 'inputs' || v === 'results') {            // old deep links
+      history.replaceState(null, '', '#workspace'); v = 'workspace';
+    }
     return VIEWS.indexOf(v) >= 0 ? v : 'start';
   }
   function renderSteps(v) {
-    var labels = {start: 'Choose building', inputs: 'Describe it', results: 'Results'};
-    document.getElementById('steps').innerHTML = '<ol>' + VIEWS.map(function (k, i) {
+    var labels = {start: 'Choose building', inputs: 'Describe it', results: 'Results'}, st = document.getElementById('steps');
+    if (!st) return;
+    st.innerHTML = '<ol>' + VIEWS.map(function (k, i) {
       var cur = k === v;
       return '<li><a href="#' + k + '"' + (cur ? ' aria-current="step" class="on"' : '') + '><span class="n">' + (i + 1) + '</span>' +
         labels[k] + '</a></li>';
@@ -1398,6 +1402,13 @@
     renderSteps(v);
     if (v === 'start') {
       el.innerHTML = startView();
+    } else if (v === 'workspace') {
+      if (!document.getElementById('iv') || S.rebuild) {
+        var y0 = window.scrollY;
+        el.innerHTML = inputsView() + resultsView();
+        if (S.rebuild) window.scrollTo(0, y0);
+      } else refreshInputs();
+      S.rebuild = false;
     } else if (v === 'inputs') {
       if (!document.getElementById('iv') || S.rebuild) {
         var y = window.scrollY;
@@ -1500,8 +1511,7 @@
         return '<option value="' + s.id + '"' + (s.id === S.station ? ' selected' : '') + '>' + esc(s.label) + '</option>';
       }).join('') + '</select><p class="climate">' + esc(climateNote(st.climate_zone_stat)) + '</p></div>' +
       '<p class="hint">The nearest of the weather stations with ASHRAE design data. Typical envelope values follow its climate zone.</p></div>';
-    h += '<div class="start-actions"><a class="btn primary big" href="#inputs">Next: Describe your building →</a>' +
-      '<a class="btn big" href="#results">Skip to results with typical values</a></div>';
+    h += '<div class="start-actions"><a class="btn primary big" href="#workspace">Next: Describe your building →</a></div>';
     h += '</section></div>';
     return h;
   }

@@ -5,20 +5,24 @@
   --line: #DCE2E8;
   --ground: #F5F7F9;
   --surface: #FFFFFF;
-  /* Actions: black buttons, white text. Backgrounds: white and light grey only;
-     blue/orange mark cooling/heating in text, icons and charts, never as fills. */
+  /* v3: buttons black/white only; colour carries meaning (blue cooling,
+     orange heating, green positive status), never actions. */
   --action: #15202B; --action-tint: #EEF1F4;
   --grey: #EEF1F4; --grey-2: #F5F7F9;
-  --cool: #1D5FB4; --cool-tint: #F5F7F9; --cool-ink: #174C90;
-  --heat: #B4500F; --heat-tint: #F5F7F9; --heat-ink: #93410C;
+  --ok: #08534A; --ok-tint: #E3F2EF;
+  --cool: #1D5FB4; --cool-tint: #E8F0FB; --cool-ink: #174C90;
+  --heat: #B4500F; --heat-tint: #FBEEE4; --heat-ink: #93410C;
+  --flash: #FFF4D6;
+  --radius-card: 6px; --radius-control: 4px;
+  --font-head: "Open Sans", "Figtree", system-ui, sans-serif;
   --font: "Figtree", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --radius: 18px;
+  --radius: var(--radius-card);
   /* Older names, mapped onto the tokens, for the panels not yet redesigned */
   --bg: var(--ground); --surface-2: #EEF2F5; --ink-2: var(--muted); --ink-3: var(--muted); --ink-4: #8A96A3;
   --border: var(--line); --border-strong: #C5CED7; --accent: var(--cool); --accent-bg: var(--grey);
-  --good: #1B6B3A; --good-bg: var(--grey); --bad: #A33A1A; --bad-bg: var(--grey);
-  --warn: #7A5A00; --warn-bg: var(--grey); --sans: var(--font); --r: 14px;
+  --good: var(--ok); --good-bg: var(--grey); --bad: #A33A1A; --bad-bg: var(--grey);
+  --warn: #7A5A00; --warn-bg: var(--grey); --sans: var(--font); --r: var(--radius-card);
   color-scheme: light;
 }
 
@@ -580,3 +584,28 @@ details.eng .card { margin-top: 16px; }
   details.eng { padding: 0 16px; }
   .rv-actions .btn { flex: 1 1 auto; }
 }
+
+
+/* ── v3 visual system: tight corners, black/white buttons ───────────────── */
+.btn, .chip, .units-toggle, .units-toggle button, .seg, .seg button, .opt, .loc select, input, select, .goal-in input,
+.custom .field input, .adv-body .field input, .adv-body .field select, .cost-in .field input, .cost-in .field select,
+.jump button, .linklike { border-radius: var(--radius-control); }
+.card, .tile, .hc, .how-steps li, .start-card, .sec, .jump, .live-card, .ans, .run-strip, .gloss-q, .r-card, .ls, details.eng,
+.no-res, dialog#help, .kpi { border-radius: var(--radius-card); }
+.btn { background: var(--ink); color: #fff; border: 2px solid var(--ink); }
+.btn:hover { background: #2E3B48; border-color: #2E3B48; }
+.btn.secondary { background: var(--surface); color: var(--ink); border: 2px solid var(--ink); }
+.btn.secondary:hover { background: var(--ground); }
+.btn.text { background: transparent; border-color: transparent; color: var(--ink); text-decoration: underline; padding: 0 8px; }
+.btn.text:hover { background: transparent; color: var(--muted); }
+/* segmented controls: selected = white with a 2px ink ring */
+.units-toggle { background: var(--ground); }
+.units-toggle button.on, .seg button.on { background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); }
+.seg.dark button.on { background: var(--ink); color: #fff; box-shadow: none; }
+/* Start */
+.hero h1 { font-family: var(--font-head); font-weight: 800; }
+.hc.cool { background: var(--cool-tint); } .hc.heat { background: var(--heat-tint); }
+.tile.on { border: 2px solid var(--ink); background: var(--ground); }
+.tile.on .ico { color: var(--ink); }
+.t-check { border-radius: 999px; }
+.chip.on { background: var(--surface); color: var(--ink); border: 2px solid var(--ink); }
