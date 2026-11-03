@@ -397,38 +397,9 @@
     return g.fields;
   }
 
-  function renderInputs() {
-    S.rebuild = true;                      // the Inputs view rebuilds on its next render
-    if (!document.getElementById('inputs')) return;
-    var st = stationById(S.station), h = '', zone = S.czOverride || stationZone();
-    var types = D.archetypes.types;
-    h += '<div class="panel-head"><div class="step">Building</div>';
-    h += '<div class="field wide"><label for="f-type">Building type</label><select id="f-type">' +
-      Object.keys(types).map(function (t) {
-        return '<option value="' + t + '"' + (t === S.type ? ' selected' : '') + '>' + esc(types[t].label) + '</option>';
-      }).join('') + '</select></div>';
-    h += '<div class="field wide"><label for="f-station">Location (weather station)</label><select id="f-station">' +
-      D.stations.map(function (s) {
-        return '<option value="' + s.id + '"' + (s.id === S.station ? ' selected' : '') + '>' + esc(s.label) + '</option>';
-      }).join('') + '</select><span class="hint">Climate zone ' + esc(zone) + (S.czOverride ? ' (set under Advanced)' :
-        ' from the weather file') + '. Envelope defaults follow it.</span></div>';
-    h += '<label class="toggle"><input type="checkbox" id="f-sources"' + (S.showSources ? ' checked' : '') +
-      '> Show where each default comes from</label></div>';
-    GROUPS.forEach(function (g) {
-      var op = S.open[g.title] === undefined ? g.open : S.open[g.title];
-      h += '<details class="grp" data-g="' + esc(g.title) + '"' + (op ? ' open' : '') + '><summary>' + esc(g.title) + '</summary>';
-      groupFields(g).forEach(function (f) { h += fieldHtml(f[0], f[1], f[2], f[3]); });
-      if (g.title === 'Advanced') h += czFieldHtml();
-      h += '</details>';
-    });
-    h += '<details class="grp" data-g="Energy and carbon"' + (S.open['Energy and carbon'] ? ' open' : '') + '><summary>Energy and carbon</summary>' +
-      energyHtml() + '</details>';
-    h += '<details class="grp" data-g="Plant cost"' + (S.open['Plant cost'] ? ' open' : '') + '><summary>Plant cost</summary>' +
-      plantHtml() + '</details>';
-    h += '<div class="actions"><button class="btn" id="b-reset" type="button">Reset to defaults</button></div>';
-    var el = document.getElementById('inputs');
-    if (el) el.innerHTML = h;
-  }
+  // Inputs changed outside the Inputs view's own boxes (type, station,
+  // units, reset, applied plans): rebuild that view on its next render.
+  function renderInputs() { S.rebuild = true; }
 
   function czFieldHtml() {
     return '<div class="field"><label for="f-cz">Code climate zone (envelope defaults)</label><select id="f-cz">' +
@@ -741,7 +712,7 @@
     var mk = modelKeyFor(S.type, S.station), m = mk && SUR[mk], heating = S.tzLoad === 'heating';
     var engineOn = S.engine && S.engine.available, hash = scenarioHash(S.sc), sc0 = S.sc, def = S.defaults;
     var ep = S.epSens && S.epSens.hash === hash && S.epSens.done ? S.epSens : null;
-    var head = '<div class="card"><div class="card-head"><div><h2>Which design choices move the peak most</h2></div>' +
+    var head = '<section class="card r-card" id="ranked"><div class="r-head"><h2>Biggest ways to shrink the ' + (heating ? 'heating' : 'cooling') + ' equipment</h2>' +
       seg('tzLoad', [['cooling', 'Cooling'], ['heating', 'Heating']], S.tzLoad) + '</div>';
     var unit = heating ? uH() : uC(), dp = heating || !isIP() ? 0 : 1;
     var conv = heating ? sc0.gfa_m2 / 1000 * (isIP() ? C.MBH_PER_KW : 1) * sc0.heating_sizing_factor
@@ -758,9 +729,9 @@
       source = '<span class="badge ep">EnergyPlus sweep</span>';
     } else if (m) {
       var res = C.surrogateResult(m, sc0);
-      if (res.incompatible) return head + '<p class="sub">The trained model is from an older version of the tool; refit it.</p></div>';
+      if (res.incompatible) return head + '<p class="sub">The trained model is from an older version of the tool; refit it.</p></section>';
       var g = governed(res, sc0), out = (heating ? g.hKey : g.cKey) + '|total_w_m2';
-      if (!m.outputs[out]) return head + '</div>';
+      if (!m.outputs[out]) return head + '</section>';
       var failed = C.failedTest(m, S.type);
       if (failed) {
         notes += '<div class="note warn">The model for this type and station missed the accuracy limit (' + fmt(failed.worst, 1) +
@@ -778,7 +749,7 @@
       });
       source = '<span class="badge sur">' + (failed ? 'Indicative estimate' : 'Instant estimate') + '</span>';
     } else {
-      if (mk && SUR_INDEX[mk]) { loadModel(mk); return head + '<p class="sub">Loading the trained model…</p></div>'; }
+      if (mk && SUR_INDEX[mk]) { loadModel(mk); return head + '<p class="sub">Loading the trained model…</p></section>'; }
       rows = [];
     }
     var nRuns = 1 + 2 * sweepRanges(sc0, def).length;
@@ -789,7 +760,7 @@
       (!engineOn ? '<p class="sub" style="margin-top:6px">' + esc((S.engine && S.engine.reason) || 'EnergyPlus cannot run in this browser.') + '</p>' : '');
     if (!rows.length) {
       return head + '<p class="sub">No trained model for this building type and station, so there is no instant sensitivity. ' +
-        'Run the exact sweep to get it from EnergyPlus.</p>' + sweepBtn + '</div>';
+        'Run the exact sweep to get it from EnergyPlus.</p>' + sweepBtn + '</section>';
     }
     rows.forEach(function (r) { r.span = Math.abs(r.dh - r.dl); });
     // Inputs with no effect (e.g. lighting on the heating design day) are left out.
@@ -807,17 +778,19 @@
     opps.sort(function (a, b) { return a.d - b.d; });
     opps = opps.slice(0, 8);
     var omx = opps.length ? -opps[0].d : 1;
-    var h = head + '<p class="sub">' + source + ' The changes that would lower the peak ' + load + ' load most, each tried on its own ' +
-      'with everything else as you have set it. Combine several with <b>Reach a target</b> below.</p>' + notes;
+    var h = head + '<p class="sub">' + source + ' Each change tried on its own, with everything else as you set it. ' +
+      'Combine several with the goal planner below.</p>' + notes;
     if (!opps.length) h += '<p class="sub">None of the design inputs lowers this peak within its realistic range.</p>';
-    h += '<ol class="opps">';
-    opps.forEach(function (o) {
+    h += '<ol class="ranked">';
+    opps.forEach(function (o, i) {
       var pc = basePeak ? -o.d / basePeak * 100 : null;
-      h += '<li><div class="opp-text">' + plainAction(o.key, o.v, heating) + '</div>' +
-        '<div class="opp-bar"><div class="fill ' + load + '" style="width:' + (-o.d / omx * 100) + '%"></div></div>' +
-        '<div class="opp-val num">−' + fmt(-o.d, dp) + ' ' + unit + (pc != null ? ' <span>(−' + fmt(pc, 0) + '%)</span>' : '') + '</div></li>';
+      h += '<li><span class="rk">' + (i + 1) + '</span><div class="rk-text"><b>' + plainAction(o.key, o.v, heating) + '</b>' +
+        '<span class="rk-hint">' + esc(SWEEP_LABELS[o.key]) + ': ' + sweepValue(o.key, leverValueNow(o.key)) + ' → ' + sweepValue(o.key, o.v) + '</span></div>' +
+        '<div class="rk-bar"><span class="' + load + '" style="width:' + (-o.d / omx * 100) + '%"></span></div>' +
+        '<div class="rk-val"><b>' + (pc != null ? '−' + fmt(pc, 0) + '%' : '') + '</b><span>−' + fmt(-o.d, dp) + ' ' + unit + '</span></div>' +
+        '<a class="rk-try" href="#inputs" data-scroll="q-' + (o.key === 'oa_multiplier' ? (ventMethod() === 'ach' ? 'oa_ach' : 'oa_per_person_ls') : o.key) + '">Try this</a></li>';
     });
-    h += '</ol>' + (heating ? '<p class="sub">The heating design day has no sun and no people, lighting or equipment, so those inputs ' +
+    h += '</ol>' + (heating ? '<p class="sub">No sun and nobody inside on the coldest morning, so people, lighting, equipment and sun ' +
       'cannot lower the heating peak.</p>' : '');
     // Technical view: both ends of every range, as before.
     h += '<details class="tech"' + (S.techView ? ' open' : '') + ' id="tech-view"><summary>Technical view: both ends of each input\'s range</summary>' +
@@ -838,7 +811,7 @@
         '<div class="bar-wrap"><div class="axis"></div>' + bar(r.dl) + bar(r.dh) + '</div>' +
         '<div class="tz-meta">' + effect(r.lo, r.dl) + ' &nbsp;·&nbsp; ' + effect(r.hi, r.dh) + '</div></div>';
     });
-    return h + '</div></details>' + (ep ? '' : sweepBtn) + '</div>';
+    return h + '</div></details>' + (ep ? '' : sweepBtn) + '</section>';
   }
 
   // One sweep result as something a design team can act on.
@@ -974,6 +947,8 @@
   function runOptimizer() {
     var mk = modelKeyFor(S.type, S.station), m = mk && SUR[mk], o = S.opt;
     var tc = parseFloat(o.clg), th = parseFloat(o.htg);
+    if (!(tc > 0)) tc = NaN;
+    if (!(th > 0)) th = NaN;
     if (!m || (isNaN(tc) && isNaN(th))) return;
     var sc0 = S.sc, def = S.defaults, gfa = sc0.gfa_m2;
     var names = ['clg_db_' + S.coolPct + '|total_w_m2', 'clg_dp_' + S.coolPct + '|total_w_m2', 'htg_' + S.heatPct + '|total_w_m2'];
@@ -990,85 +965,83 @@
 
   function optimizerCard(g) {
     var mk = modelKeyFor(S.type, S.station), m = mk && SUR[mk], o = S.opt;
-    var h = '<div class="card"><div class="card-head"><div><h2>Reach a target</h2><p class="sub">Set a peak reduction, choose the ' +
-      'levers you\'ll allow, and the tool searches the trained model for settings that get there. Ranges start at the realistic range ' +
-      'the models were trained on; you can narrow them.</p></div></div>';
-    if (!m) return h + '<p class="sub">Needs a trained model for this building type and station.</p></div>';
-    h += '<div class="opt-targets"><label>Reduce cooling peak by <input id="f-opt-clg" type="number" min="1" max="90" step="1" value="' +
-      esc(o.clg) + '"> %</label><label>Reduce heating peak by <input id="f-opt-htg" type="number" min="1" max="90" step="1" value="' +
-      esc(o.htg) + '"> % <span class="sub">(blank = no target)</span></label></div>';
+    var h = '<section class="card r-card" id="planner"><h2>Set a goal and let the tool find a way there</h2>' +
+      '<p class="sub">Say how much smaller you want the equipment, and the tool searches the trained model for a plan of design changes that gets there.</p>';
+    if (!m) return h + '<p class="sub">Needs a trained model for this building type and location.</p></section>';
+    h += '<div class="goals"><label class="goal cool"><span>' + SNOW + 'Make cooling smaller by</span><span class="goal-in"><input id="f-opt-clg" type="number" min="0" max="90" step="1" value="' +
+      esc(o.clg) + '" inputmode="numeric"> %</span></label><label class="goal heat"><span>' + FLAME + 'Make heating smaller by</span><span class="goal-in"><input id="f-opt-htg" type="number" min="0" max="90" step="1" value="' +
+      esc(o.htg) + '" inputmode="numeric"> %</span></label><button class="btn" type="button" id="b-opt">Find a plan</button></div>' +
+      '<p class="sub">Leave a box empty or at 0 for no goal on that load.</p>';
     var levers = optLevers();
-    h += '<details class="opt-levers"' + (o.showLevers ? ' open' : '') + ' id="opt-levers"><summary>Levers (' +
+    var eng = '<details class="tech" id="opt-levers"' + (o.showLevers ? ' open' : '') + '><summary>For engineers: levers and ranges (' +
       levers.filter(function (l) { return l.on; }).length + ' of ' + levers.length + ' allowed)</summary>' +
       '<div class="scroll-x"><table class="t"><thead><tr><th>Allow</th><th>Lever</th><th>Now</th><th>Lowest</th><th>Highest</th><th>Cost per unit ($, optional)</th></tr></thead><tbody>';
     levers.forEach(function (l) {
-      h += '<tr><td><input type="checkbox" data-opt-on="' + l.key + '"' + (l.on ? ' checked' : '') + '></td><td>' + esc(SWEEP_LABELS[l.key]) + '</td>' +
+      eng += '<tr><td><input type="checkbox" data-opt-on="' + l.key + '"' + (l.on ? ' checked' : '') + ' aria-label="Allow ' + esc(SWEEP_LABELS[l.key]) + '"></td><td>' + esc(SWEEP_LABELS[l.key]) + '</td>' +
         '<td class="num">' + sweepValue(l.key, l.v0) + '</td>' +
-        '<td><input class="opt-num" type="number" step="' + leverStep(l.key) + '" data-opt-lo="' + l.key + '" value="' + esc(leverDisp(l.key, l.lo)) + '" title="Trained range starts at ' + esc(leverDisp(l.key, l.trainedLo)) + '"></td>' +
-        '<td><input class="opt-num" type="number" step="' + leverStep(l.key) + '" data-opt-hi="' + l.key + '" value="' + esc(leverDisp(l.key, l.hi)) + '" title="Trained range ends at ' + esc(leverDisp(l.key, l.trainedHi)) + '"></td>' +
-        '<td><input class="opt-num" type="number" min="0" step="any" data-opt-cost="' + l.key + '" value="' + esc(leverCostDisp(l.key, (o.levers[l.key] || {}).cost)) + '"></td></tr>';
+        '<td><input class="opt-num" type="number" step="' + leverStep(l.key) + '" data-opt-lo="' + l.key + '" value="' + esc(leverDisp(l.key, l.lo)) + '" aria-label="Lowest ' + esc(SWEEP_LABELS[l.key]) + '" title="Trained range starts at ' + esc(leverDisp(l.key, l.trainedLo)) + '"></td>' +
+        '<td><input class="opt-num" type="number" step="' + leverStep(l.key) + '" data-opt-hi="' + l.key + '" value="' + esc(leverDisp(l.key, l.hi)) + '" aria-label="Highest ' + esc(SWEEP_LABELS[l.key]) + '" title="Trained range ends at ' + esc(leverDisp(l.key, l.trainedHi)) + '"></td>' +
+        '<td><input class="opt-num" type="number" min="0" step="any" data-opt-cost="' + l.key + '" value="' + esc(leverCostDisp(l.key, (o.levers[l.key] || {}).cost)) + '" aria-label="Cost per unit for ' + esc(SWEEP_LABELS[l.key]) + '"></td></tr>';
     });
-    h += '</tbody></table></div><p class="sub" style="margin:6px 0 0">Equipment power and occupant density start switched off (they follow ' +
+    eng += '</tbody></table></div><p class="sub">Equipment power and occupant density start switched off (they follow ' +
       'the client\'s use, not the design). Outdoor air starts at the code rate as its lowest value. Values are in the selected units (WWR and heat recovery as fractions). ' +
-      'Cost is your $ for the whole building per unit change of that input; only used for the lowest-cost option.</p></details>';
-    h += '<div class="actions"><button class="btn primary" type="button" id="b-opt">Find options</button></div>';
+      'Cost is your $ for the whole building per unit change of that input; used only for the lowest-cost plan. "Smallest overall change" counts each move as the share ' +
+      'it uses of that input\'s room, from its current value to the end of its range.</p>';
     var res = o.result, key = scenarioHash(S.sc) + '|' + S.coolPct + '|' + S.heatPct;
-    if (!res) return h + '</div>';
-    if (res.hash !== key) return h + '<div class="note info">Inputs have changed since the last search.</div></div>';
-    var r = res.r, b = r.baseline;
-    if (res.failed) h += '<div class="note warn">The model for this type and station missed the accuracy limit, so these options are indicative. Confirm the one you choose with EnergyPlus.</div>';
-    function pct(v, base) { return (v - base) / base * 100; }
-    function option(title, pt, note) {
-      if (!pt) return '<div class="opt-col"><h3>' + esc(title) + '</h3><p class="sub">' + esc(note || 'No option found.') + '</p></div>';
-      var d = r.describe(pt), x = '<div class="opt-col"><h3>' + esc(title) + '</h3><ul class="opt-moves">';
-      var byH = isNaN(parseFloat(o.clg));
-      d.moved.forEach(function (mv) {
-        var sv = byH ? capH(mv.saves.htg) : capC(mv.saves.clg);
-        x += '<li><b>' + esc(SWEEP_LABELS[mv.key]) + '</b> ' + sweepValue(mv.key, mv.from) + ' → ' + sweepValue(mv.key, mv.to) +
-          ' <span class="opp-save">' + (sv >= 0 ? '−' : '+') + fmt(Math.abs(sv), byH || !isIP() ? 0 : 1) + ' ' + (byH ? uH() : uC()) + '</span></li>';
-      });
-      x += '</ul><div class="opt-res">Cooling ' + fmt(capC(d.result.clg), isIP() ? 1 : 0) + ' ' + uC() + ' <b class="' + (pct(d.result.clg, b.clg) < 0 ? 'good' : 'bad') + '">' +
-        fmt(pct(d.result.clg, b.clg), 1) + '%</b> · Heating ' + fmt(capH(d.result.htg), 0) + ' ' + uH() + ' <b class="' + (pct(d.result.htg, b.htg) <= 0 ? 'good' : 'bad') + '">' +
-        (pct(d.result.htg, b.htg) > 0 ? '+' : '') + fmt(pct(d.result.htg, b.htg), 1) + '%</b>';
-      var ct = parseFloat(S.rates.cooling[S.plant.cooling]), cm = parseFloat(S.rates.heating[S.plant.heating]);
-      if (!isNaN(ct) || !isNaN(cm)) {
-        var save = (isNaN(ct) ? 0 : (tons(b.clg) - tons(d.result.clg)) * ct) + (isNaN(cm) ? 0 : (mbh(b.htg) - mbh(d.result.htg)) * cm);
-        x += '<br>Plant cost ' + (save >= 0 ? '−$' : '+$') + fmt(Math.abs(save), 0);
-      }
-      if (d.cost) x += '<br>Your lever cost $' + fmt(d.cost, 0);
-      x += '</div><div class="actions"><button class="btn" type="button" data-opt-apply="' + title + '">Apply</button>' +
-        '<button class="btn" type="button" data-opt-apply-run="' + title + '">Apply and run EnergyPlus</button></div></div>';
-      o.picks = o.picks || {}; o.picks[title] = d.values;
-      return x;
-    }
-    if (r.feasible) {
-      h += '<div class="opt-cols">' + option('Fewest changes', r.fewest, 'None within 6 levers.') + option('Smallest overall change', r.smallest) +
-        option('Lowest cost', r.cheapest, 'Enter a cost per unit for some levers to rank by cost.') + '</div>';
-    } else {
-      h += '<div class="note warn">These levers can\'t reach the target within their ranges. The most they achieve together is shown below; ' +
-        'allow more levers, widen a range, or lower the target.</div><div class="opt-cols">' + option('Best achievable', r.bestAchievable) + '</div>';
-    }
-    // The most each number of changes can do, naming the changes.
-    var prevPc = null, met = false;
-    h += '<h3>How far you can get by changing 1, 2, 3 … things</h3><p class="sub">For each number of changes, the best ' +
-      'combination among the allowed levers' + (r.feasible ? ', pulled back to just meet your target once it can' : '') + '.</p><ol class="opt-count">';
-    r.byCount.forEach(function (c) {
-      var d = r.describe(c.pt), pcC = -pct(d.result.clg, b.clg), pcH = -pct(d.result.htg, b.htg);
-      var byH = isNaN(parseFloat(o.clg)), pc = byH ? pcH : pcC;
-      if (met) return;                                   // once the target is met, more changes add nothing
-      if (prevPc != null && pc < prevPc + 0.5 && c.pt.s > 0) return;
-      met = c.pt.s <= 0;
-      prevPc = pc;
-      h += '<li><div class="oc-n">' + c.levers + ' change' + (c.levers > 1 ? 's' : '') + '</div><div class="oc-what">' +
-        d.moved.map(function (mv) { return esc(SWEEP_LABELS[mv.key]) + ' ' + sweepValue(mv.key, mv.from) + ' → ' + sweepValue(mv.key, mv.to); }).join('; ') +
-        '</div><div class="oc-res num">' + (byH ? 'Heating −' + fmt(pcH, 1) + '%' : 'Cooling −' + fmt(pcC, 1) + '%') +
-        (c.pt.s <= 0 ? ' <span class="good">meets target</span>' : '') + '</div></li>';
+    if (!res) return h + eng + '</details></section>';
+    if (res.hash !== key) return h + '<div class="note info">Your answers have changed since the last search. Find a plan again.</div>' + eng + '</details></section>';
+    var r = res.r, b = r.baseline, wantC = r.goal.clg != null, wantH = r.goal.htg != null;
+    if (res.failed) h += '<div class="note warn">The trained model for this type and location missed the accuracy limit, so this plan is indicative. Check it in EnergyPlus.</div>';
+    var plans = r.feasible ? [['fewest', 'Fewest changes', r.fewest], ['smallest', 'Smallest overall change', r.smallest], ['cheapest', 'Lowest cost', r.cheapest]]
+      .filter(function (x) { return x[2]; }) : [['best', 'Best possible', r.bestAchievable]];
+    var pick = plans.filter(function (x) { return x[0] === S.planPick; })[0] || plans[0];
+    if (plans.length > 1) h += '<div class="plan-pick">' + seg('planPick', plans.map(function (x) { return [x[0], x[1]]; }), pick[0]) + '</div>';
+    var d = r.describe(pick[2]);
+    o.picks = o.picks || {}; o.picks[pick[1]] = d.values;
+    var gotC = (b.clg - d.result.clg) / b.clg * 100, gotH = (b.htg - d.result.htg) / b.htg * 100;
+    var okC = !wantC || gotC >= (b.clg - r.goal.clg) / b.clg * 100 - 0.05, okH = !wantH || gotH >= (b.htg - r.goal.htg) / b.htg * 100 - 0.05;
+    var status = wantC && wantH ? (okC && okH ? 'Both goals reached' : okC ? 'Cooling reached · heating not reachable with these levers' :
+      okH ? 'Heating reached · cooling not reachable with these levers' : 'Neither goal reachable with these levers')
+      : (okC && okH ? 'Goal reached' : 'Goal not reachable with these levers: this is the most they can do');
+    h += '<div class="plan"><div class="plan-status ' + (okC && okH ? 'ok' : 'no') + '">' + (okC && okH ? '✓ ' : '! ') + esc(status) + '</div>' +
+      '<h3>Suggested plan</h3><ul class="checklist">';
+    d.moved.forEach(function (mv) {
+      h += '<li><span class="tick" aria-hidden="true">✓</span><div><b>' + plainAction(mv.key, mv.to, !wantC) + '</b><span class="rk-hint">' +
+        esc(SWEEP_LABELS[mv.key]) + ': ' + sweepValue(mv.key, mv.from) + ' → ' + sweepValue(mv.key, mv.to) + '</span></div>' +
+        '<span class="eff cool">' + SNOW + (mv.saves.clg >= 0 ? '−' : '+') + fmt(Math.abs(capC(mv.saves.clg)), isIP() ? 1 : 0) + ' ' + uC() + '</span>' +
+        '<span class="eff heat">' + FLAME + (mv.saves.htg >= 0 ? '−' : '+') + fmt(Math.abs(capH(mv.saves.htg)), 0) + ' ' + uH() + '</span></li>';
     });
-    h += '</ol><p class="sub" style="margin-top:6px">Rows that add a change without lowering the peak further are left out. Changes in each option are listed ' +
-      'biggest first; the figure beside each is how much the peak would rise if that change alone were dropped. "Smallest overall change" counts each move ' +
-      'as the share it uses of that input\'s room, from its current value to the end of its range. Estimates from the trained model; confirm the option ' +
-      'you choose with EnergyPlus.</p></div>';
-    return h;
+    h += '</ul>';
+    function prog(kind, got, want) {
+      var goal = want, w = Math.max(0, Math.min(100, got / 60 * 100)), gm = goal != null ? Math.min(100, goal / 60 * 100) : null;
+      return '<div class="prog ' + kind + '"><div class="prog-l">' + (kind === 'cool' ? SNOW + 'Cooling' : FLAME + 'Heating') +
+        '<b>' + (got >= 0 ? '−' : '+') + fmt(Math.abs(got), 1) + '%</b>' + (goal != null ? '<span>goal −' + fmt(goal, 0) + '%</span>' : '<span>no goal</span>') + '</div>' +
+        '<div class="prog-track" role="img" aria-label="' + kind + ' reduced ' + fmt(got, 1) + '%' + (goal != null ? ' of a ' + fmt(goal, 0) + '% goal' : '') + '">' +
+        '<span class="prog-fill" style="width:' + w + '%"></span>' + (gm != null ? '<span class="prog-goal" style="left:' + gm + '%"></span>' : '') + '</div></div>';
+    }
+    h += prog('cool', gotC, wantC ? (b.clg - r.goal.clg) / b.clg * 100 : null) + prog('heat', gotH, wantH ? (b.htg - r.goal.htg) / b.htg * 100 : null);
+    var ct = parseFloat(S.rates.cooling[S.plant.cooling]), cm = parseFloat(S.rates.heating[S.plant.heating]);
+    if (!isNaN(ct) || !isNaN(cm)) {
+      var save = (isNaN(ct) ? 0 : (tons(b.clg) - tons(d.result.clg)) * ct) + (isNaN(cm) ? 0 : (mbh(b.htg) - mbh(d.result.htg)) * cm);
+      h += '<p class="plan-cost">Equipment cost ' + (save >= 0 ? '−$' : '+$') + fmt(Math.abs(save), 0) + ' at your rates' + (d.cost ? ' · your lever cost $' + fmt(d.cost, 0) : '') + '</p>';
+    }
+    h += '<div class="actions"><button class="btn" type="button" data-opt-apply-run="' + esc(pick[1]) + '">Check this plan in EnergyPlus · 1 run</button>' +
+      '<button class="btn" type="button" data-opt-apply="' + esc(pick[1]) + '">Apply plan to my answers</button></div></div>';
+    // For engineers: the best result with 1, 2, 3 … changes.
+    var prevPc = null, met = false, byH = !wantC;
+    eng += '<h3>How far you can get by changing 1, 2, 3 … things</h3><ol class="opt-count">';
+    r.byCount.forEach(function (c) {
+      var dd = r.describe(c.pt), pcC = (b.clg - dd.result.clg) / b.clg * 100, pcH = (b.htg - dd.result.htg) / b.htg * 100, pc = byH ? pcH : pcC;
+      if (met) return;
+      if (prevPc != null && pc < prevPc + 0.5 && c.pt.s > 0) return;
+      met = c.pt.s <= 0; prevPc = pc;
+      eng += '<li><div class="oc-n">' + c.levers + ' change' + (c.levers > 1 ? 's' : '') + '</div><div class="oc-what">' +
+        dd.moved.map(function (mv) { return esc(SWEEP_LABELS[mv.key]) + ' ' + sweepValue(mv.key, mv.from) + ' → ' + sweepValue(mv.key, mv.to); }).join('; ') +
+        '</div><div class="oc-res num">' + (byH ? 'Heating −' + fmt(pcH, 1) + '%' : 'Cooling −' + fmt(pcC, 1) + '%') +
+        (c.pt.s <= 0 ? ' · meets goal' : '') + '</div></li>';
+    });
+    eng += '</ol>';
+    return h + eng + '</details></section>';
   }
 
   // Display a swept input value in everyday units.
@@ -1102,10 +1075,10 @@
   function costCard(g, b) {
     var ct = parseFloat(S.rates.cooling[S.plant.cooling]), cm = parseFloat(S.rates.heating[S.plant.heating]);
     var t = tons(g.clg), m = mbh(g.htg);
-    var h = '<div class="card"><h2>Plant cost</h2><p class="sub">Capacity × your installed-cost rate for the plant types chosen under ' +
-      '"Plant cost" (left panel). Sizing factors included.</p>';
+    var h = '<section class="card r-card"><h2>What might the equipment cost?</h2><p class="sub">Equipment size × your own installed-cost rate. ' +
+      'The tool has no built-in cost data. Sizing factors included.</p><div class="cost-in">' + plantHtml() + '</div>';
     if (isNaN(ct) && isNaN(cm)) {
-      return h + '<div class="empty">Enter your ' + (isIP() ? '$/ton and $/MBH' : '$/kW') + ' rates under <b>Plant cost</b> to price the plant.</div></div>';
+      return h + '<p class="sub">Enter a rate above to see the cost.</p></section>';
     }
     function cell(label, cap, capUnit, rate, rateUnit, bcap, dcap, drate) {
       if (isNaN(rate)) return '<div class="kpi"><div class="kpi-label">' + esc(label) + '</div><div class="kpi-sec">No rate entered</div></div>';
@@ -1121,7 +1094,7 @@
       '<div class="kpi"><div class="kpi-label">Total plant</div><div class="kpi-value">$' + fmt(tot, 0) + '</div>' +
       deltaHtml(tot, btot, function (v) { return '$' + fmt(v, 0); }) + '</div></div>';
     h += '<p class="sub" style="margin:8px 0 0">Linear $/capacity only. Real equipment comes in discrete sizes and redundancy (N+1) steps, ' +
-      'so check a change against the next size up or down before banking it.</p></div>';
+      'so check a change against the next size up or down before banking it.</p></section>';
     return h;
   }
 
@@ -1402,55 +1375,7 @@
   }
 
   // ── Results page ────────────────────────────────────────────────────────
-  function renderResults() {
-    var res = resultFor(S.sc, S.ep), g = res.source === 'none' ? null : governed(res, S.sc);
-    var b = null;
-    if (S.baseline) {
-      var bRes = resultFor(S.baseline.sc, S.baseline.ep);
-      b = bRes.source === 'none' ? null : governed(bRes, S.baseline.sc);
-    }
-    var engineOn = S.engine && S.engine.available;
-    var h = '<div class="card"><div class="card-head"><div><h2>Peak loads</h2><p class="sub">' +
-      esc(D.archetypes.types[S.type].label) + ' · ' + esc(stationById(S.station).label) + '</p></div>' +
-      '<div>' + sourceBadge(g) + '</div></div>';
-    h += '<div class="conds"><span>Cooling design condition</span>' + seg('coolPct', [['0.4', '0.4%'], ['1', '1%'], ['2', '2%']], S.coolPct) +
-      '<span>Heating</span>' + seg('heatPct', [['99.6', '99.6%'], ['99', '99%']], S.heatPct) + '</div>';
-    if (g) {
-      h += headlineKpis(g, b);
-      if (g.source === 'surrogate') h += surrogateNotes(res, g);
-      if (g.cf !== 1 || g.hf !== 1) h += '<div class="note info">Includes sizing factors: cooling ×' + fmt(g.cf, 2) + ', heating ×' + fmt(g.hf, 2) + '.</div>';
-      if (b && b.source !== g.source) h += '<div class="note warn">Baseline and current come from different sources (' + b.source + ' vs ' + g.source + '). Compare like with like before quoting the difference.</div>';
-    } else {
-      h += noResultHtml(res);
-    }
-    if (S.runError) h += '<div class="note bad">' + esc(S.runError) + '</div>';
-    h += '<div class="actions">' +
-      '<button class="btn primary" type="button" id="b-run"' + (engineOn && !S.running ? '' : ' disabled') + '>' +
-      (S.running ? esc(S.engineMsg || 'Running EnergyPlus…') : 'Run EnergyPlus') + '</button>' +
-      '<button class="btn" type="button" id="b-base"' + (g ? '' : ' disabled') + '>Set as baseline</button>' +
-      (S.baseline ? '<button class="btn" type="button" id="b-clear">Clear baseline</button>' : '') + '</div>';
-    if (!engineOn && S.engine) h += '<p class="sub" style="margin-top:8px">' + esc(S.engine.reason || 'EnergyPlus service unavailable') + '</p>';
-    h += '</div>';
-    h += '<div class="tabs" role="tablist">' +
-      '<button type="button" role="tab" data-tab="summary"' + (S.tab === 'summary' ? ' class="on" aria-selected="true"' : '') + '>Summary</button>' +
-      '<button type="button" role="tab" data-tab="details"' + (S.tab === 'details' ? ' class="on" aria-selected="true"' : '') + '>Detailed data</button></div>';
-    if (S.tab === 'summary') {
-      if (g) h += designDayCard(g, b) + breakdownCard(g, b);
-      h += sensitivityCard();
-      if (g) h += optimizerCard(g);
-      if (g) h += costCard(g, b);
-      h += annualCard();
-    } else {
-      if (g) {
-        h += '<div class="card"><h2>Peak load detail</h2><p class="sub">Selected condition: cooling ' + S.coolPct + '%, heating ' + S.heatPct + '%.</p>' +
-          detailKpis(g, b) + compareTable(g, b) + '</div>';
-        if (g.source === 'energyplus') h += energyplusCard(res, g);
-      }
-      h += designConditionsCard() + assumptionsCard();
-    }
-    var el = document.getElementById('results');
-    if (el) el.innerHTML = h;
-  }
+  function renderResults() { renderView(); }
 
   function render() { renderStatus(); renderView(); save(); }
 
@@ -1481,13 +1406,7 @@
       } else refreshInputs();
       S.rebuild = false;
     } else {
-      // Interim (steps 3-5 replace these): today's panels inside the new frame.
-      if (!document.getElementById('results')) {
-        el.innerHTML = '<div class="layout"><aside class="inputs" id="inputs" aria-label="Design inputs"></aside>' +
-          '<section class="results" id="results" aria-live="polite"></section></div>';
-        renderInputs();
-      }
-      renderResults();
+      el.innerHTML = resultsView();
     }
     el.setAttribute('data-view', v);
   }
@@ -1838,6 +1757,145 @@
     return h + '<a class="btn" href="#results">See full results</a></div>';
   }
 
+  // ── Results view ────────────────────────────────────────────────────────
+  // The peak design day in plain words, with the hour when a full run gave it.
+  function busyPhrase(key, time) {
+    var p = (key || '').split('_'), s;
+    if (p[0] === 'htg') s = 'the coldest winter day (' + p[1] + '% heating design day)';
+    else if (p[1] === 'db') s = 'the hottest summer day (' + p[2] + '% dry-bulb design day)';
+    else s = 'a very humid summer day (' + p[2] + '% dew-point design day)';
+    if (time && /^\d{1,2}:\d{2}/.test(time)) {
+      var hh = Math.round(+time.split(':')[0] + (+time.split(':')[1]) / 60) % 24;
+      s += ', around ' + (hh === 0 ? 'midnight' : hh === 12 ? 'noon' : (hh % 12) + (hh < 12 ? ' am' : ' pm'));
+    }
+    return s;
+  }
+  function answerCard(kind, g, b) {
+    var cool = kind === 'cool', v = cool ? capC(g.clg) : capH(g.htg), dp = cool && isIP() ? 1 : 0, ft2 = g.gfa * C.FT2_PER_M2;
+    var sec = cool ? (isIP() ? fmt(ft2 / tons(g.clg), 0) + ' ft² per ton · ' + fmt(g.clg / 1000, 0) + ' kW' : fmt(g.clg / g.gfa, 1) + ' W/m² · ' + fmt(tons(g.clg), 1) + ' tons')
+      : (isIP() ? fmt(mbh(g.htg) * 1000 / ft2, 1) + ' Btu/h per ft² · ' + fmt(g.htg / 1000, 0) + ' kW' : fmt(g.htg / g.gfa, 1) + ' W/m² · ' + fmt(mbh(g.htg), 0) + ' MBH');
+    var bv = b ? (cool ? capC(b.clg) : capH(b.htg)) : null, unit = cool ? uC() : uH();
+    var chip = '';
+    if (bv != null) {
+      var d = v - bv, pc = bv ? d / bv * 100 : 0;
+      chip = Math.abs(d) < Math.pow(10, -dp) / 2 ? '<span class="dchip same">Same as your baseline</span>' :
+        '<span class="dchip ' + (d < 0 ? 'down' : 'up') + '">' + (d < 0 ? '▼ ' : '▲ ') + fmt(Math.abs(d), dp) + ' ' + unit + ' (' + fmt(Math.abs(pc), 1) + '%) ' +
+        (d < 0 ? 'smaller' : 'bigger') + ' than your baseline</span>';
+    }
+    return '<div class="ans ' + kind + '"><div class="ans-label">' + (cool ? SNOW + 'Cooling equipment size' : FLAME + 'Heating equipment size') + '</div>' +
+      '<div class="ans-num">' + fmt(v, dp) + '<span>' + unit + '</span></div><div class="ans-sec">' + sec + '</div>' +
+      '<div class="busy"><b>Busiest moment:</b> ' + esc(busyPhrase(cool ? g.cKey : g.hKey, cool ? g.time : g.hTime)) + '</div>' + chip + '</div>';
+  }
+  function loadSidebar(g) {
+    function block(kind) {
+      var cool = kind === 'cooling', acc = sliceTotals(kind, g), conv = cool ? capC : capH, unit = cool ? uC() : uH(), dp = cool && isIP() ? 1 : 0;
+      var h = '<div class="ls-block ' + (cool ? 'cool' : 'heat') + '"><div class="ls-title">' + (cool ? SNOW + 'Cooling' : FLAME + 'Heating') +
+        '<b>' + fmt(conv(cool ? g.clg : g.htg), dp) + ' ' + unit + '</b></div>' + stackedBreakdown(kind, g, false);
+      if (acc) {
+        var neg = SLICE_ORDER.filter(function (k) { return acc[k] < 0; });
+        if (neg.length) h += '<p class="ls-note">Lowers the peak: ' + neg.map(function (k) {
+          return esc(SLICE_LABEL[k]) + ' −' + fmt(Math.abs(conv(acc[k])), dp) + ' ' + unit; }).join(', ') + '.</p>';
+      }
+      if (!cool) h += '<p class="ls-note">No sun and nobody inside on the coldest morning, so the heating peak is fresh air and heat lost through the envelope.</p>';
+      return h + '</div>';
+    }
+    return '<section class="card ls" aria-labelledby="ls-title"><h2 id="ls-title">Where does the load come from?</h2>' +
+      '<p class="sub">Each source\'s share at the hour the whole building peaks.</p>' + block('cooling') + block('heating') + '</section>';
+  }
+  function confidenceCard(g) {
+    var m = SUR[modelKeyFor(S.type, S.station)], ho = m && m.holdout;
+    return '<section class="card r-card"><h2>How sure are these numbers?</h2><dl class="conf">' +
+      '<dt><span class="badge-src ep">Full simulation · EnergyPlus</span></dt><dd>EnergyPlus 25.2, the US Department of Energy\'s simulation engine, ' +
+      'ran your exact answers in this browser.</dd>' +
+      '<dt><span class="badge-src sur">Instant estimate</span></dt><dd>A model trained on ' + (m ? fmt(m.n_samples, 0) : 'many') + ' EnergyPlus runs for this type and location' +
+      (ho && ho.worst_governing_p95_pct != null ? ', within about ' + fmt(Math.ceil(ho.worst_governing_p95_pct), 0) + '% of EnergyPlus on ' + ho.n + ' separate test runs' : '') +
+      '. Run a full simulation for numbers that go into a basis of design.</dd></dl>' +
+      '<p class="sub">This tool is at validation stage: heating peaks have been checked against hand calculations; cooling peaks not yet against an ' +
+      'independent reference.</p></section>';
+  }
+  function engineersSection(res, g, b) {
+    var h = '<details class="card eng" id="eng"' + (S.open.eng ? ' open' : '') + '><summary><h2>For engineers: detailed data</h2>' +
+      '<span class="sub">Design conditions, airflow, outdoor-air loads, every design day, profiles, zone sizing, defaults and downloads.</span></summary>';
+    h += '<div class="conds"><span>Design condition: cooling</span>' + seg('coolPct', [['0.4', '0.4%'], ['1', '1%'], ['2', '2%']], S.coolPct) +
+      '<span>heating</span>' + seg('heatPct', [['99.6', '99.6%'], ['99', '99%']], S.heatPct) + '</div>';
+    if (g) {
+      h += '<div class="card"><h2>Peak load detail</h2><p class="sub">Selected condition: cooling ' + S.coolPct + '%, heating ' + S.heatPct + '%.</p>' +
+        detailKpis(g, b) + compareTable(g, b) + '</div>';
+      h += designDayCard(g, b) + breakdownCard(g, b);
+      if (g.source === 'energyplus') h += energyplusCard(res, g);
+    }
+    return h + designConditionsCard() + assumptionsCard() + '</details>';
+  }
+  function resultsView() {
+    var res = resultFor(S.sc, S.ep), g = res.source === 'none' ? null : governed(res, S.sc);
+    var b = null;
+    if (S.baseline) {
+      var bRes = resultFor(S.baseline.sc, S.baseline.ep);
+      b = bRes.source === 'none' ? null : governed(bRes, S.baseline.sc);
+    }
+    var st = stationById(S.station), engineOn = S.engine && S.engine.available;
+    var h = '<div class="wrap rv"><div class="rv-head"><div>' +
+      (g ? '<span class="badge-src ' + (g.source === 'energyplus' ? 'ep' : 'sur') + '">' + (g.source === 'energyplus' ? 'Full simulation · EnergyPlus' : 'Instant estimate') + '</span>' : '') +
+      '<h1>Your results</h1><p class="lead">' + esc(D.archetypes.types[S.type].label) + ' · ' + esc(st.label) + ' · ' + area(S.sc.gfa_m2) + ' on ' +
+      fmt(S.sc.n_floors, 0) + ' floor' + (S.sc.n_floors > 1 ? 's' : '') + '</p><a class="back" href="#inputs">← Change my answers</a></div>' +
+      '<div class="rv-actions"><button type="button" class="btn" id="b-base"' + (g ? '' : ' disabled') + '>Save as my baseline</button>' +
+      (S.baseline ? '<button type="button" class="btn" id="b-clear">Clear baseline</button>' : '') +
+      '<button type="button" class="btn" id="b-report"' + (g ? '' : ' disabled') + '>Download report</button></div></div>';
+    if (g) {
+      if (g.source === 'surrogate') h += surrogateNotes(res, g);
+      if (g.cf !== 1 || g.hf !== 1) h += '<div class="note info">Includes sizing factors: cooling ×' + fmt(g.cf, 2) + ', heating ×' + fmt(g.hf, 2) + '.</div>';
+      if (b && b.source !== g.source) h += '<div class="note warn">Your baseline and these results come from different sources (' + b.source + ' vs ' + g.source + '). Compare like with like before quoting the difference.</div>';
+      h += '<div class="answers">' + answerCard('cool', g, b) + answerCard('heat', g, b) + '</div>';
+    } else {
+      h += '<div class="card no-res">' + noResultHtml(res) + '</div>';
+    }
+    if (S.runError) h += '<div class="note bad">' + esc(S.runError) + '</div>';
+    var running = S.running ? esc(S.engineMsg || 'Running EnergyPlus…') : null;
+    if (!g || g.source !== 'energyplus') {
+      h += '<div class="run-strip' + (g ? '' : ' need') + '"><p>' + (g ? 'Want the exact numbers for these answers?' : 'This combination needs a full simulation.') + '</p>' +
+        '<button type="button" class="btn" id="b-run"' + (engineOn && !S.running ? '' : ' disabled') + '>' + (running || 'Run full simulation · ~4 sec') + '</button>' +
+        (!engineOn ? '<p class="sub">' + esc((S.engine && S.engine.reason) || '') + '</p>' : '') + '</div>';
+    } else {
+      h += '<div class="run-strip done"><p>Full simulation of your current answers' + (S.ep.run.engine && S.ep.run.engine.run_seconds ? ', ' + fmt(S.ep.run.engine.run_seconds, 1) + ' s' : '') + '.</p></div>';
+    }
+    h += '<details class="gloss-q"><summary>What do “tons” and “MBH” mean?</summary><dl class="gloss">' +
+      '<dt>Ton (of cooling)</dt><dd>12,000 Btu per hour, or 3.517 kW: the usual US unit for cooling equipment size.</dd>' +
+      '<dt>MBH</dt><dd>1,000 Btu per hour, or 0.293 kW: the usual US unit for heating equipment size.</dd>' +
+      '<dt>Peak</dt><dd>The most heating or cooling needed in any one hour on an extreme design day. The equipment is sized for it.</dd></dl></details>';
+    h += '<div class="rv-cols"><div class="rv-main">' + sensitivityCard();
+    if (g) h += optimizerCard(g);
+    h += '<div class="pair">' + (g ? costCard(g, b) : '') + confidenceCard(g) + '</div>';
+    h += annualCard() + engineersSection(res, g, b) + '</div>';
+    if (g) h += '<aside class="rv-side">' + loadSidebar(g) + '</aside>';
+    return h + '</div></div>';
+  }
+
+  // A one-page report of the current results (HTML, opens in any browser).
+  function reportHtml() {
+    var res = resultFor(S.sc, S.ep), g = res.source === 'none' ? null : governed(res, S.sc), st = stationById(S.station);
+    if (!g) return null;
+    var changed = [];
+    GROUPS.forEach(function (gr) { gr.fields.forEach(function (f) {
+      if (isChanged(f[0], f[2])) changed.push('<li>' + esc(f[1]) + ': ' + esc(String(toDisp(f[2], S.defaults[f[0]]))) + ' → ' + esc(String(toDisp(f[2], S.sc[f[0]]))) +
+        (unitLabel(f[2]) ? ' ' + esc(unitLabel(f[2])) : '') + '</li>');
+    }); });
+    function shares(kind) {
+      var acc = sliceTotals(kind, g); if (!acc) return '<p>Not available for this result.</p>';
+      var pos = SLICE_ORDER.filter(function (k) { return acc[k] > 0; }), gross = pos.reduce(function (t, k) { return t + acc[k]; }, 0);
+      return '<ul>' + pos.sort(function (a, c) { return acc[c] - acc[a]; }).map(function (k) { return '<li>' + esc(SLICE_LABEL[k]) + ': ' + fmt(acc[k] / gross * 100, 0) + '%</li>'; }).join('') + '</ul>';
+    }
+    return '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Peak load report</title><style>body{font:15px/1.5 system-ui,sans-serif;max-width:760px;margin:32px auto;padding:0 16px;color:#15202B}' +
+      'h1{font-size:26px}h2{font-size:18px;margin-top:24px}.big{font-size:28px;font-weight:800}</style></head><body>' +
+      '<h1>Peak heating and cooling: ' + esc(D.archetypes.types[S.type].label) + '</h1><p>' + esc(st.label) + ' (climate zone ' + esc(st.climate_zone_stat) + ') · ' +
+      area(S.sc.gfa_m2) + ' on ' + fmt(S.sc.n_floors, 0) + ' floors · ' + new Date().toISOString().slice(0, 10) + '</p>' +
+      '<p><b>Source:</b> ' + (g.source === 'energyplus' ? 'Full simulation (EnergyPlus ' + esc((S.ep.run.engine || {}).version || '') + ')' : 'Instant estimate (model trained on EnergyPlus runs)') +
+      '. Design condition: cooling ' + S.coolPct + '%, heating ' + S.heatPct + '%. Validation-stage tool.</p>' +
+      '<h2>Cooling</h2><p class="big">' + fmt(capC(g.clg), isIP() ? 1 : 0) + ' ' + uC() + '</p><p>Busiest moment: ' + esc(busyPhrase(g.cKey, g.time)) + '.</p>' + shares('cooling') +
+      '<h2>Heating</h2><p class="big">' + fmt(capH(g.htg), 0) + ' ' + uH() + '</p><p>Busiest moment: ' + esc(busyPhrase(g.hKey, g.hTime)) + '.</p>' + shares('heating') +
+      '<h2>Answers changed from typical values</h2>' + (changed.length ? '<ul>' + changed.join('') + '</ul>' : '<p>None: typical values for this type and location.</p>') +
+      '</body></html>';
+  }
+
   // ── Actions ─────────────────────────────────────────────────────────────
   function download(name, text, type) {
     var a = document.createElement('a');
@@ -1873,10 +1931,10 @@
     if (en && en[1] !== 'heatSource') {
       var ev = t.value;
       if (en[1] === 'sfp' && isIP() && ev !== '' && !isNaN(parseFloat(ev))) ev = +fromIP('W/(L/s)', parseFloat(ev)).toFixed(6);
-      S.energy[en[1]] = ev; renderResults(); save(); return;
+      S.energy[en[1]] = ev; save(); return;
     }
     var rate = t.id && t.id.match(/^f-rate-(cooling|heating)$/);
-    if (rate) { S.rates[rate[1]][S.plant[rate[1]]] = rateFromDisp(rate[1], t.value); renderResults(); save(); return; }
+    if (rate) { S.rates[rate[1]][S.plant[rate[1]]] = rateFromDisp(rate[1], t.value); save(); return; }
     var k = t.getAttribute('data-k');
     if (!k) return;
     var spec = D.fields[k] || {}, unit = unitOf(k);
@@ -1904,6 +1962,7 @@
 
   function onChange(e) {
     var t = e.target;
+    if (t.id && /^f-(e-(?!heatSource)|rate-)/.test(t.id)) { render(); return; }
     if (t.id === 'f-type') { S.type = t.value; resetScenario(); S.ep = null; renderInputs(); render(); }
     else if (t.id === 'f-station') {
       S.station = t.value; S.czOverride = null; S.ep = null; S.baseline = null;
@@ -1957,6 +2016,7 @@
       S.baseline = {sc: JSON.parse(JSON.stringify(S.sc)), ep: S.ep && S.ep.hash === scenarioHash(S.sc) ? S.ep : null};
       render();
     } else if (t.id === 'b-clear') { S.baseline = null; render(); }
+    else if (t.id === 'b-report') { var rh = reportHtml(); if (rh) download('peak-load-report-' + S.type + '-' + S.station + '.html', rh, 'text/html'); }
     else if (t.id === 'b-dl-idf' && S.ep) download('peak-load-' + S.type + '-' + S.station + '.idf', S.ep.run.idf || '', 'text/plain');
     else if (t.id === 'b-dl-json' && S.ep) {
       var copy = JSON.parse(JSON.stringify(S.ep.run)); delete copy.idf;
@@ -1976,6 +2036,7 @@
     var g = e.target.getAttribute && e.target.getAttribute('data-g');
     if (g) S.open[g] = e.target.open;
     if (e.target.id === 'sec-advanced') S.open.advanced = e.target.open;
+    if (e.target.id === 'eng') S.open.eng = e.target.open;
     if (e.target.id === 'opt-levers') S.opt.showLevers = e.target.open;
     if (e.target.id === 'tech-view') S.techView = e.target.open;
   }, true);
