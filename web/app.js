@@ -1765,15 +1765,57 @@
     });
     var sk = document.getElementById('wwr-sketch');
     if (sk) sk.innerHTML = wwrSketch();
-    var lv = document.getElementById('live');
-    if (lv) lv.innerHTML = liveHtml();
+    clearTimeout(S.liveTimer);
+    S.liveTimer = setTimeout(function () {
+      var lv = document.getElementById('live');
+      if (lv) lv.innerHTML = liveHtml();
+    }, 150);
   }
   function setStatus(id, n) {
     [].forEach.call(document.querySelectorAll('[data-status="' + id + '"]'), function (el) {
       el.textContent = statusText(n); el.classList.toggle('ch', n > 0);
     });
   }
-  // "Your building so far" (step 4 adds deltas and breakdowns).
+  // "Your building so far": both peaks, the change against typical values
+  // (the type's defaults at the same size and shape), and where each load
+  // comes from as a stacked bar.
+  function typicalResult() {
+    var typ = JSON.parse(JSON.stringify(S.defaults));
+    ['gfa_m2', 'n_floors', 'aspect_ratio', 'north_axis_deg'].forEach(function (k) { typ[k] = S.sc[k]; });
+    typ.station = S.station;
+    var r = resultFor(typ, null);
+    return r.source === 'none' ? null : governed(r, typ);
+  }
+  function sliceTotals(kind, g) {
+    var groups = g.result.groups && g.result.groups[kind];
+    if (!groups) return null;
+    var rows = breakdownRows(groups, kind === 'cooling' ? g.cBlock : g.hBlock, kind === 'cooling' ? g.cf : g.hf), acc = {};
+    rows.forEach(function (r) { var k = SLICE_OF[r.key] || 'other'; acc[k] = (acc[k] || 0) + r.w; });
+    return acc;
+  }
+  function stackedBreakdown(kind, g, compact) {
+    var acc = sliceTotals(kind, g);
+    if (!acc) return '<p class="sub">The breakdown appears after a full simulation for this case.</p>';
+    var pos = SLICE_ORDER.filter(function (k) { return acc[k] > 0; });
+    var gross = pos.reduce(function (t, k) { return t + acc[k]; }, 0);
+    var h = '<div class="stack" role="img" aria-label="' + (kind === 'cooling' ? 'Cooling' : 'Heating') + ' load by source: ' +
+      pos.map(function (k) { return SLICE_LABEL[k] + ' ' + fmt(acc[k] / gross * 100, 0) + '%'; }).join(', ') + '">';
+    pos.forEach(function (k) {
+      h += '<span style="width:' + (acc[k] / gross * 100) + '%;background:var(--s-' + k + ')" title="' + esc(SLICE_LABEL[k]) + ' ' + fmt(acc[k] / gross * 100, 0) + '%"></span>';
+    });
+    h += '</div><ul class="stack-key' + (compact ? ' compact' : '') + '">';
+    pos.slice().sort(function (a, b) { return acc[b] - acc[a]; }).forEach(function (k) {
+      h += '<li><i style="background:var(--s-' + k + ')"></i><span>' + esc(SLICE_LABEL[k]) + '</span><b>' + fmt(acc[k] / gross * 100, 0) + '%</b></li>';
+    });
+    return h + '</ul>';
+  }
+  function deltaVsTypical(cur, typ, unit, dp) {
+    if (typ == null) return '';
+    var d = cur - typ;
+    if (Math.abs(d) < Math.pow(10, -dp) / 2) return '<div class="vs same">Same as typical values</div>';
+    return '<div class="vs ' + (d < 0 ? 'down' : 'up') + '">' + (d < 0 ? '▼ ' : '▲ ') + fmt(Math.abs(d), dp) + ' ' + unit +
+      (d < 0 ? ' smaller' : ' bigger') + ' than typical</div>';
+  }
   function liveHtml() {
     var res = resultFor(S.sc, S.ep), g = res.source === 'none' ? null : governed(res, S.sc);
     var h = '<div class="live-card card"><div class="live-title">Your building so far</div>';
@@ -1781,9 +1823,18 @@
       return h + '<div class="note warn">' + noResultHtml(res) + '</div><button type="button" class="btn" id="b-run"' +
         (S.engine && S.engine.available && !S.running ? '' : ' disabled') + '>' + (S.running ? esc(S.engineMsg || 'Running…') : 'Run full simulation · ~4 sec') + '</button></div>';
     }
+    var t = g.source === 'surrogate' ? typicalResult() : null;
+    var m = SUR[modelKeyFor(S.type, S.station)], ho = m && m.holdout;
     h += '<span class="badge-src ' + (g.source === 'energyplus' ? 'ep' : 'sur') + '">' + (g.source === 'energyplus' ? 'Full simulation · EnergyPlus' : 'Instant estimate') + '</span>';
-    h += '<div class="live-num cool"><span class="ln-label">' + SNOW + 'Cooling</span><span class="ln-val">' + fmt(capC(g.clg), isIP() ? 1 : 0) + '</span><span class="ln-unit">' + uC() + '</span></div>';
-    h += '<div class="live-num heat"><span class="ln-label">' + FLAME + 'Heating</span><span class="ln-val">' + fmt(capH(g.htg), 0) + '</span><span class="ln-unit">' + uH() + '</span></div>';
+    var dpC = isIP() ? 1 : 0;
+    h += '<div class="live-num cool"><span class="ln-label">' + SNOW + 'Cooling</span><span class="ln-val">' + fmt(capC(g.clg), dpC) + '</span><span class="ln-unit">' + uC() + '</span>' +
+      '<div class="ln-more">' + deltaVsTypical(capC(g.clg), t && capC(t.clg), uC(), dpC) + stackedBreakdown('cooling', g, true) + '</div></div>';
+    h += '<div class="live-num heat"><span class="ln-label">' + FLAME + 'Heating</span><span class="ln-val">' + fmt(capH(g.htg), 0) + '</span><span class="ln-unit">' + uH() + '</span>' +
+      '<div class="ln-more">' + deltaVsTypical(capH(g.htg), t && capH(t.htg), uH(), 0) + stackedBreakdown('heating', g, true) + '</div></div>';
+    if (g.source === 'surrogate' && ho && ho.worst_governing_p95_pct != null) {
+      h += '<p class="live-note">Instant estimates for this type and location are within about ' + fmt(Math.ceil(ho.worst_governing_p95_pct), 0) +
+        '% of EnergyPlus (tested on ' + ho.n + ' separate runs).</p>';
+    }
     return h + '<a class="btn" href="#results">See full results</a></div>';
   }
 
