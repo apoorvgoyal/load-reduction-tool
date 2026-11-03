@@ -86,46 +86,33 @@ def build_model(user):
     return st, ddy, stat, sc, prov
 
 
-def run(user, include_idf=False, keep_dir=None, exe=None, version=None, annual=False):
-    """Design-day sizing run, or with annual=True a full-year run on the
-    station's weather file returning monthly energy."""
-    t0 = time.time()
-    if exe is None:
-        exe, version = find_energyplus()
-    if not exe:
-        return {'ok': False, 'error': 'EnergyPlus not found. Install EnergyPlus and set ENERGYPLUS_EXE.',
-                'code': 'no_engine'}
+def prepare(user, version=None, annual=False):
+    """Resolve the scenario and write the IDF. Shared by the native runner
+    below and the in-browser runner (web/ep-browser.js), so both build the
+    same model."""
     st, ddy, stat, sc, prov = build_model(user)
     text, model = idf.build(sc, ddy, stat, eplus_version=version or '25.2', annual=annual)
-    epw = epw_path(st['id']) if annual else None
-    work = keep_dir or tempfile.mkdtemp(prefix='loads_')
-    os.makedirs(work, exist_ok=True)
-    try:
-        idf_path = os.path.join(work, 'in.idf')
-        with open(idf_path, 'w') as f:
-            f.write(text)
-        cmd = [exe, '-d', work] + (['-w', epw] if epw else []) + [idf_path]
-        proc = subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=ANNUAL_TIMEOUT_S if annual else DEFAULT_TIMEOUT_S)
-        msgs = results.parse_err(os.path.join(work, 'eplusout.err'))
-        sql = os.path.join(work, 'eplusout.sql')
-        if proc.returncode != 0 or not os.path.exists(sql) or msgs['fatal']:
-            return {'ok': False, 'error': 'EnergyPlus run failed', 'code': 'eplus_failed',
-                    'messages': msgs, 'stdout_tail': proc.stdout[-2000:], 'stderr_tail': proc.stderr[-2000:]}
-        if annual:
-            out = {'ok': True, 'mode': 'annual',
-                   'engine': {'name': 'EnergyPlus', 'version': version, 'run_seconds': round(time.time() - t0, 2)},
-                   'station': {'id': st['id'], 'label': st['label'], 'weather_file': os.path.basename(epw)},
-                   'scenario': sc, 'provenance': prov,
-                   'annual': results.parse_annual(sql, model), 'messages': msgs}
-            if include_idf:
-                out['idf'] = text
-            return out
+    return {'st': st, 'ddy': ddy, 'stat': stat, 'sc': sc, 'prov': prov, 'idf': text, 'model': model,
+            'annual': annual, 'version': version or '25.2'}
+
+
+def assemble(prep, sql, msgs, run_seconds, include_idf=False, weather_file=None, engine_where=None):
+    """The result JSON from a finished run's eplusout.sql and error summary."""
+    st, ddy, stat, sc, prov, model = (prep[k] for k in ('st', 'ddy', 'stat', 'sc', 'prov', 'model'))
+    engine = {'name': 'EnergyPlus', 'version': prep['version'], 'run_seconds': round(run_seconds, 2)}
+    if engine_where:
+        engine['where'] = engine_where
+    if prep['annual']:
+        out = {'ok': True, 'mode': 'annual', 'engine': engine,
+               'station': {'id': st['id'], 'label': st['label'], 'weather_file': weather_file},
+               'scenario': sc, 'provenance': prov,
+               'annual': results.parse_annual(sql, model), 'messages': msgs}
+    else:
         parsed = results.parse_sql(sql, model)
+        engine['version'] = parsed['eplus_version'] or prep['version']
         out = {
             'ok': True,
-            'engine': {'name': 'EnergyPlus', 'version': parsed['eplus_version'] or version,
-                       'run_seconds': round(time.time() - t0, 2)},
+            'engine': engine,
             'station': {'id': st['id'], 'label': st['label'], 'ddy_source': ddy['source_note'],
                         'climate_zone_stat': stat['climate_zone']},
             'scenario': sc,
@@ -138,9 +125,38 @@ def run(user, include_idf=False, keep_dir=None, exe=None, version=None, annual=F
             'components_by_floor': parsed['components_by_floor'],
             'messages': msgs,
         }
-        if include_idf:
-            out['idf'] = text
-        return out
+    if include_idf:
+        out['idf'] = prep['idf']
+    return out
+
+
+def run(user, include_idf=False, keep_dir=None, exe=None, version=None, annual=False):
+    """Design-day sizing run, or with annual=True a full-year run on the
+    station's weather file returning monthly energy."""
+    t0 = time.time()
+    if exe is None:
+        exe, version = find_energyplus()
+    if not exe:
+        return {'ok': False, 'error': 'EnergyPlus not found. Install EnergyPlus and set ENERGYPLUS_EXE.',
+                'code': 'no_engine'}
+    prep = prepare(user, version, annual)
+    epw = epw_path(prep['st']['id']) if annual else None
+    work = keep_dir or tempfile.mkdtemp(prefix='loads_')
+    os.makedirs(work, exist_ok=True)
+    try:
+        idf_path = os.path.join(work, 'in.idf')
+        with open(idf_path, 'w') as f:
+            f.write(prep['idf'])
+        cmd = [exe, '-d', work] + (['-w', epw] if epw else []) + [idf_path]
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=ANNUAL_TIMEOUT_S if annual else DEFAULT_TIMEOUT_S)
+        msgs = results.parse_err(os.path.join(work, 'eplusout.err'))
+        sql = os.path.join(work, 'eplusout.sql')
+        if proc.returncode != 0 or not os.path.exists(sql) or msgs['fatal']:
+            return {'ok': False, 'error': 'EnergyPlus run failed', 'code': 'eplus_failed',
+                    'messages': msgs, 'stdout_tail': proc.stdout[-2000:], 'stderr_tail': proc.stderr[-2000:]}
+        return assemble(prep, sql, msgs, time.time() - t0, include_idf,
+                        weather_file=os.path.basename(epw) if epw else None)
     finally:
         if not keep_dir:
             shutil.rmtree(work, ignore_errors=True)

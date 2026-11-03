@@ -2,11 +2,13 @@
 
 Peak Load Tool: heating/cooling design loads on ASHRAE design days, calculated with EnergyPlus (`engine/`), served by a small server to a vanilla-JS page (`web/`). `server.py` (Python stdlib, the default) and `server.js` (Node) are equivalent; keep their endpoints and behaviour in sync. See `README.md` for the methodology and limitations.
 
+The page runs EnergyPlus in the browser (`web/ep-browser.js`): `engine/run_scenario.py` `prepare`/`assemble` under Pyodide, EnergyPlus 25.2 as WebAssembly (`@idfkit/engine`). Native runs (`run_scenario.run`, `batch.py`, `POST /api/run`) share `prepare`/`assemble`, so keep model building and result assembly in those two functions. Whatever `run_scenario.py` imports must be listed by `engine/web_files.py` (the browser fetches only those files) and must work under Pyodide (no subprocesses or network at import time). After changing model building or results parsing, re-check browser vs native parity on a few cases (README, Quick start).
+
 ## Setup
 
 - **Python 3.9+** for the engine and the default server (`server.py`). Standard library only.
 - **Node 18+** only for `server.js` and the parity tests. No npm packages.
-- **EnergyPlus 24.x/25.x** for real runs: on `PATH` as `energyplus`, or set `ENERGYPLUS_EXE=/path/to/energyplus`. The IDF `Version` is taken from `energyplus --version`.
+- **EnergyPlus 24.x/25.x** for native runs (command line, `batch.py` training, `POST /api/run`): on `PATH` as `energyplus`, or set `ENERGYPLUS_EXE=/path/to/energyplus`. The IDF `Version` is taken from `energyplus --version`. The page itself needs no EnergyPlus install (it runs 25.2 in the browser).
 - **Optional:**
   - `numpy`: surrogate fitting (`engine/fit_surrogate.py`) and its tests.
   - `openstudio`: IDD validation tests.
@@ -34,7 +36,7 @@ python3 -m unittest discover -s engine/tests -t engine
   echo '{"type":"office","station":"chicago","gfa_m2":10000,"n_floors":4}' | python3 engine/run_scenario.py - | python3 -m json.tool | head -40
   ```
   Check that `messages.severe` is 0 and `messages.fatal` is empty. Add `--keep DIR` to inspect `eplusout.err`.
-- **UI check:** `node --check web/app.js && node --check web/core.js && node --check server.js`, then load the page via `python3 server.py`. It must work at 390 px width without horizontal scroll.
+- **UI check:** `node --check web/app.js && node --check web/core.js && node --check web/ep-browser.js && node --check server.js`, then load the page via `python3 server.py` and click **Run EnergyPlus** (runs in the browser). It must work at 390 px width without horizontal scroll.
 
 ## Regenerated files (don't hand-edit)
 

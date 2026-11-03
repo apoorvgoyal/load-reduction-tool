@@ -2,3 +2,4 @@ engine/runs/
 __pycache__/
 *.pyc
 engine/weather/epw/
+_site/

@@ -28,8 +28,8 @@ It is independent of the Total Carbon Tool: its own server, its own page, no sha
 
 | | EnergyPlus run (option C) | Surrogate (option B) |
 |---|---|---|
-| What | Design-day sizing run of the current scenario | Fast model fitted to many EnergyPlus runs per building type × station |
-| Speed | Seconds to minutes per run | Instant; drives the sliders and the sensitivity chart |
+| What | Design-day sizing run of the current scenario, run by EnergyPlus 25.2 **in your browser** | Fast model fitted to many EnergyPlus runs per building type × station |
+| Speed | About 4 s per run (the first run also loads ~45 MB, then cached) | Instant; drives the sliders and the sensitivity chart |
 | Use for | Numbers that go into a basis of design | Exploring options, ranking strategies |
 | Shown as | Green **EnergyPlus run** badge, with component breakdown, zone sizing, IDF download | Blue **Surrogate estimate** badge, with its out-of-sample error (95th percentile) |
 
@@ -61,22 +61,30 @@ The surrogate is only used when it passed its independent test against fresh Ene
 ## Quick start
 
 ```bash
-# 1. EnergyPlus 24.x/25.x from https://energyplus.net (any OS). Check:
-energyplus --version            # or set ENERGYPLUS_EXE=/path/to/energyplus
-
-# 2. Run the tool (Python 3.9+ only, no packages needed for this step)
 cd load-reduction-tool
-python server.py                # opens http://localhost:3100 in your browser; Ctrl+C to stop
+python server.py                # Python 3.9+ only; opens http://localhost:3100. Ctrl+C to stop
 ```
 
-On Windows, use `py` if `python` isn't recognized. Setting the EnergyPlus path in Command Prompt:
-`set ENERGYPLUS_EXE=C:\EnergyPlusV25-2-0\energyplus.exe` (adjust to your install), then `py server.py`.
+On Windows, use `py` if `python` isn't recognized. `node server.js` is an equivalent server.
 
-`node server.js` is an equivalent server if you prefer Node (it also needs `LOADS_PYTHON` when Python isn't `python3`).
+**No EnergyPlus install is needed to use the page.** Instant estimates are the default; **Run EnergyPlus**, the exact sensitivity sweep and annual energy run EnergyPlus 25.2 inside the browser:
 
-Opening `web/index.html` directly (without a server) still shows the design conditions and any trained surrogate; EnergyPlus runs need a server.
+- `web/ep-browser.js` loads the engine's own Python (`engine/run_scenario.py`: `prepare` writes the IDF, `assemble` reads `eplusout.sql`) under [Pyodide](https://pyodide.org) 0.29.5, and EnergyPlus 25.2 compiled to WebAssembly from [`@idfkit/engine`](https://github.com/idfkit/idfkit-engine) 0.6.0 with `@idfkit/engine-assets` 25.2.1. Both load from the jsDelivr CDN at pinned versions on the first run (about 45 MB, then cached by the browser). Needs a current Chrome, Edge, Firefox or Safari.
+- The page fetches the engine's Python, the station's `.ddy`/`.stat` and, for annual runs, its TMY3 `.epw` from `/engine/` on the same site. `engine/web_files.py` lists what is served (both servers use it); the DOE weather host sends no CORS headers, so the server downloads the `.epw` once into `engine/weather/epw`.
+- Runs use up to three parallel engines (cores − 1), so the 37-run exact sweep takes about 80 s.
+- **Checked against native EnergyPlus 25.2:** the same requests through both give the same IDF text and the same results to 1e-11 relative, across lab (Denver), hotel with heat recovery (Miami), healthcare (Fairbanks), stadium (Phoenix), school with changed inputs (Seattle) and an annual office run (Chicago), about 19,400 values. The only difference seen: on a heating design day with constant overnight conditions, a zone's reported peak *time* can fall on a different timestep of the same flat plateau (same load).
 
-Server environment variables: `PORT` (3100), `ENERGYPLUS_EXE`, `LOADS_MAX_CONCURRENT` (2), `LOADS_EPLUS_TIMEOUT` (300 s); `server.js` also reads `LOADS_PYTHON` (python3).
+`engine/run_scenario.py` still runs native EnergyPlus for the command line, the batch runs that train the surrogates, and `POST /api/run` (set `ENERGYPLUS_EXE`); see Setup in `CLAUDE.md`.
+
+### Sharing on GitHub Pages
+
+The page is a static site, so it can be published without a server:
+
+```bash
+python3 engine/web_files.py build-site _site     # web/ + engine files + the 27 weather files (~100 MB)
+```
+
+`.github/workflows/pages.yml` does this and deploys it: in the repository, **Settings → Pages → Source: GitHub Actions**, then **Actions → Deploy to GitHub Pages → Run workflow**. The site appears at `https://<owner>.github.io/<repo>/`. Pages from a private repository needs a paid GitHub plan, and the published site is public unless the repository belongs to a GitHub Enterprise Cloud organisation that restricts Pages access to its members.
 
 ## Training the surrogate (option B)
 

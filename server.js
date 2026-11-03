@@ -77,11 +77,30 @@ function runScenario(req, res) {
   });
 }
 
+// Engine files for the in-browser runner. engine/web_files.py decides what is
+// served (the same module server.py uses), so the two servers agree.
+function engineFile(rel, res) {
+  const tool = path.join(__dirname, 'engine', 'web_files.py');
+  if (rel === 'manifest.json') {
+    return execFile(PYTHON, [tool, 'manifest'], {timeout: 20000}, (err, stdout) =>
+      err ? json(res, 500, {error: 'manifest failed'}) : (res.writeHead(200, {'Content-Type': 'application/json'}), res.end(stdout)));
+  }
+  execFile(PYTHON, [tool, 'resolve', rel], {timeout: 120000}, (err, stdout) => {
+    if (err) return err.code === 1 ? (res.writeHead(404), res.end('Not found')) : json(res, 502, {error: 'Could not fetch the weather file'});
+    fs.readFile(stdout, (e, data) => {
+      if (e) { res.writeHead(404); return res.end('Not found'); }
+      res.writeHead(200, {'Content-Type': MIME[path.extname(stdout).slice(1)] || 'text/plain'});
+      res.end(data);
+    });
+  });
+}
+
 http.createServer((req, res) => {
   const url = req.url.split('?')[0];
   if (req.method === 'GET' && url === '/api/engine') return engineStatus(v => json(res, 200, v));
   if (req.method === 'POST' && url === '/api/run') return runScenario(req, res);
   if (req.method !== 'GET') return json(res, 405, {error: 'Method not allowed'});
+  if (url.startsWith('/engine/')) return engineFile(url.slice('/engine/'.length), res);
 
   const file = path.normalize(path.join(WEB, url === '/' ? 'index.html' : url));
   if (!file.startsWith(WEB + path.sep)) { res.writeHead(403); return res.end('Forbidden'); }

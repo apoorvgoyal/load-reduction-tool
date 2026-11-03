@@ -25,6 +25,7 @@ RUNNER = os.path.join(HERE, 'engine', 'run_scenario.py')
 sys.path.insert(0, os.path.join(HERE, 'engine'))
 
 import run_scenario  # noqa: E402
+import web_files  # noqa: E402
 
 MAX_CONCURRENT = int(os.environ.get('LOADS_MAX_CONCURRENT', '2'))
 TIMEOUT_S = int(os.environ.get('LOADS_EPLUS_TIMEOUT', '300')) + 30
@@ -65,9 +66,19 @@ class Handler(BaseHTTPRequestHandler):
         url = self.path.split('?')[0]
         if url == '/api/engine':
             return self._json(200, engine_status())
-        rel = 'index.html' if url == '/' else url.lstrip('/')
-        path = os.path.normpath(os.path.join(WEB, rel))
-        if not path.startswith(WEB + os.sep) or not os.path.isfile(path):
+        if url == '/engine/manifest.json':
+            return self._json(200, web_files.manifest())
+        if url.startswith('/engine/'):
+            try:
+                path = web_files.resolve(url[len('/engine/'):])
+            except Exception as e:      # weather download failed
+                return self._json(502, {'error': 'Could not fetch the weather file: %s' % e})
+        else:
+            rel = 'index.html' if url == '/' else url.lstrip('/')
+            path = os.path.normpath(os.path.join(WEB, rel))
+            if not path.startswith(WEB + os.sep):
+                path = None
+        if not path or not os.path.isfile(path):
             self.send_response(404)
             self.end_headers()
             return

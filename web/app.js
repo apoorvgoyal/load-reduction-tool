@@ -1,7 +1,8 @@
 // ── Peak Load Tool UI ────────────────────────────────────────────────────────
 // Inputs are SI (the engine's units); every value also shows its IP equivalent.
 // Results come from one of two sources, always labelled:
-//   EnergyPlus run    — engine/run_scenario.py via POST /api/run (option C)
+//   EnergyPlus run    — EnergyPlus 25.2 in this browser (ep-browser.js: WebAssembly
+//                       engine + the engine's own Python under Pyodide)
 //   Surrogate         — EnergyPlus-trained model in data/loads-surrogate.js (option B)
 // The page has two tabs: Summary (peaks, design-day charts, load breakdown,
 // sensitivity, plant cost) and Detailed data (everything else).
@@ -449,8 +450,8 @@
   function renderStatus() {
     var mk = modelKeyFor(S.type, S.station), e = S.engine, m = mk && SUR_INDEX[mk], h = '';
     if (e === null) h += '<span class="pill"><span class="dot"></span>EnergyPlus: checking…</span>';
-    else if (e.available) h += '<span class="pill ok"><span class="dot"></span>EnergyPlus ' + esc(e.version) + ' online</span>';
-    else h += '<span class="pill off" title="' + esc(e.reason || '') + '"><span class="dot"></span>EnergyPlus offline</span>';
+    else if (e.available) h += '<span class="pill ok" title="EnergyPlus runs in this browser; nothing to install"><span class="dot"></span>EnergyPlus ' + esc(e.version) + ' in browser</span>';
+    else h += '<span class="pill off" title="' + esc(e.reason || '') + '"><span class="dot"></span>EnergyPlus unavailable</span>';
     if (m) {
       var passed = !(m.holdout && m.holdout.passed === false);
       h += '<span class="pill ' + (passed ? 'ok' : 'off') + '"><span class="dot"></span>Instant estimates: ' +
@@ -497,7 +498,7 @@
       h += 'No instant estimate here: the trained model for ' + esc(D.archetypes.types[S.type].label) + ' in ' + esc(stationById(S.station).label) +
         ' missed the accuracy limit on its independent test against ' + res.failed.n + ' fresh EnergyPlus runs (worst 95th-percentile error ' +
         fmt(res.failed.worst, 1) + '%, limit ' + fmt(res.failed.limit, 1) + '%).<br>' +
-        (engineOn ? 'Click <b>Run EnergyPlus</b> to calculate this scenario.' : 'Start the tool with <code>python server.py</code> on a machine with EnergyPlus installed to calculate this scenario.');
+        (engineOn ? 'Click <b>Run EnergyPlus</b> to calculate this scenario.' : esc((S.engine && S.engine.reason) || 'EnergyPlus cannot run in this browser.'));
     } else if (res.reason === 'incompatible') {
       h += 'The trained model for this building type and station was fitted by an older version of the tool.<br>' +
         'Re-run <code>python engine/fit_surrogate.py</code> (no new EnergyPlus runs needed), then reload this page.';
@@ -507,7 +508,7 @@
       }).join(', ') + '.<br>Click <b>Run EnergyPlus</b> for this scenario.';
     } else {
       h += 'No trained model for ' + esc(D.archetypes.types[S.type].label) + ' in ' + esc(stationById(S.station).label) + ' yet.<br>' +
-        (engineOn ? 'Click <b>Run EnergyPlus</b> to calculate this scenario.' : 'Start the tool with <code>python server.py</code> on a machine with EnergyPlus installed.');
+        (engineOn ? 'Click <b>Run EnergyPlus</b> to calculate this scenario.' : esc((S.engine && S.engine.reason) || 'EnergyPlus cannot run in this browser.'));
     }
     return h + '</div>';
   }
@@ -766,7 +767,7 @@
       (S.epSensRunning ? 'Running EnergyPlus sweep… ' + S.epSensRunning.done + ' of ' + S.epSensRunning.total :
         (ep ? 'Re-run exact sweep' : 'Run exact sweep in EnergyPlus (' + nRuns + ' runs)')) + '</button></div>' +
       (S.epSensError ? '<div class="note bad">' + esc(S.epSensError) + '</div>' : '') +
-      (!engineOn ? '<p class="sub" style="margin-top:6px">The exact sweep needs EnergyPlus (python server.py on a machine with EnergyPlus).</p>' : '');
+      (!engineOn ? '<p class="sub" style="margin-top:6px">' + esc((S.engine && S.engine.reason) || 'EnergyPlus cannot run in this browser.') + '</p>' : '');
     if (!rows.length) {
       return head + '<p class="sub">No trained model for this building type and station, so there is no instant sensitivity. ' +
         'Run the exact sweep to get it from EnergyPlus.</p>' + sweepBtn + '</div>';
@@ -865,22 +866,21 @@
       return t;
     }
     function launch() {
-      while (active < 2 && next < jobs.length && !failed) {
+      while (active < window.EPBrowser.maxParallel && next < jobs.length && !failed) {
         (function (job) {
           active++;
           var body = engineInput(job.sc);
-          fetch('api/run', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
-            .then(function (r) { return r.json().then(function (j) { return {status: r.status, run: j}; }); })
-            .then(function (x) {
+          engineRun(body)
+            .then(function (run) {
+              var x = {run: run};
               active--;
-              if (x.status === 429) { jobs.push(job); setTimeout(finish, 1500); return; }   // server busy: retry shortly
               if (!x.run.ok) failed = x.run.error || 'EnergyPlus run failed';
               else if (job.key === null) out.base = totals(x.run);
               else (out.runs[job.key] = out.runs[job.key] || {})[job.side] = totals(x.run);
               S.epSensRunning.done++;
               finish();
             })
-            .catch(function (e) { active--; failed = 'Could not reach the EnergyPlus service: ' + e.message; finish(); });
+            .catch(function (e) { active--; failed = 'EnergyPlus could not start in this browser: ' + e.message; finish(); });
         })(jobs[next++]);
       }
     }
@@ -1179,9 +1179,9 @@
       if (S.annual) h += '<div class="note info">Inputs have changed since the last annual run.</div>';
       if (S.annualError) h += '<div class="note bad">' + esc(S.annualError) + '</div>';
       h += '<div class="actions"><button class="btn primary" type="button" id="b-annual"' + (engineOn && !S.annualRunning ? '' : ' disabled') + '>' +
-        (S.annualRunning ? 'Running a full year in EnergyPlus…' : 'Run annual energy') + '</button></div>' +
-        '<p class="sub" style="margin-top:8px">' + (engineOn ? 'Typically a minute or two; the weather file is downloaded on first use.' :
-          'Needs EnergyPlus (start the tool with python server.py on a machine with EnergyPlus).') + '</p></div>';
+        (S.annualRunning ? esc(S.engineMsg || 'Running a full year in EnergyPlus…') : 'Run annual energy') + '</button></div>' +
+        '<p class="sub" style="margin-top:8px">' + (engineOn ? 'Runs EnergyPlus in this browser; a full year takes a few minutes.' :
+          esc((S.engine && S.engine.reason) || 'EnergyPlus cannot run in this browser.')) + '</p></div>';
       return h;
     }
     var f = annualFigures(run.annual), t = f.total, ft2 = S.sc.gfa_m2 * C.FT2_PER_M2;
@@ -1227,15 +1227,14 @@
     S.annualRunning = true; S.annualError = null; render();
     var sc = JSON.parse(JSON.stringify(S.sc)), hash = scenarioHash(sc), body = engineInput(sc);
     body.annual = true;
-    fetch('api/run', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
-      .then(function (r) { return r.json(); })
+    engineRun(body)
       .then(function (run) {
         S.annualRunning = false;
         if (!run.ok) S.annualError = 'Annual run failed: ' + (run.error || 'unknown error');
         else { delete run.idf; S.annual = {hash: hash, run: run}; }
         render();
       })
-      .catch(function (e) { S.annualRunning = false; S.annualError = 'Could not reach the EnergyPlus service: ' + e.message; render(); });
+      .catch(function (e) { S.annualRunning = false; S.annualError = 'EnergyPlus could not start in this browser: ' + e.message; render(); });
   }
 
   // ── Detailed data ───────────────────────────────────────────────────────
@@ -1402,7 +1401,7 @@
     if (S.runError) h += '<div class="note bad">' + esc(S.runError) + '</div>';
     h += '<div class="actions">' +
       '<button class="btn primary" type="button" id="b-run"' + (engineOn && !S.running ? '' : ' disabled') + '>' +
-      (S.running ? 'Running EnergyPlus…' : 'Run EnergyPlus') + '</button>' +
+      (S.running ? esc(S.engineMsg || 'Running EnergyPlus…') : 'Run EnergyPlus') + '</button>' +
       '<button class="btn" type="button" id="b-base"' + (g ? '' : ' disabled') + '>Set as baseline</button>' +
       (S.baseline ? '<button class="btn" type="button" id="b-clear">Clear baseline</button>' : '') + '</div>';
     if (!engineOn && S.engine) h += '<p class="sub" style="margin-top:8px">' + esc(S.engine.reason || 'EnergyPlus service unavailable') + '</p>';
@@ -1438,18 +1437,24 @@
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
 
+  // Every EnergyPlus run happens in this browser (ep-browser.js). Progress
+  // messages (first-run downloads, running) show on the busy button.
+  function engineRun(body) {
+    return window.EPBrowser.run(body, function (msg) { S.engineMsg = msg; renderResults(); })
+      .then(function (run) { S.engineMsg = null; return run; }, function (e) { S.engineMsg = null; throw e; });
+  }
+
   function runEnergyPlus() {
     S.running = true; S.runError = null; render();
     var sc = JSON.parse(JSON.stringify(S.sc)), hash = scenarioHash(sc);
-    fetch('api/run', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(engineInput(sc))})
-      .then(function (r) { return r.json(); })
+    engineRun(engineInput(sc))
       .then(function (run) {
         S.running = false;
         if (!run.ok) { S.runError = 'EnergyPlus run failed: ' + (run.error || 'unknown error'); }
         else S.ep = {hash: hash, run: run};
         render();
       })
-      .catch(function (e) { S.running = false; S.runError = 'Could not reach the EnergyPlus service: ' + e.message; render(); });
+      .catch(function (e) { S.running = false; S.runError = 'EnergyPlus could not start in this browser: ' + e.message; render(); });
   }
 
   function onInput(e) {
@@ -1565,7 +1570,8 @@
     if (e.target.id === 'opt-levers') S.opt.showLevers = e.target.open;
     if (e.target.id === 'tech-view') S.techView = e.target.open;
   }, true);
-  fetch('api/engine').then(function (r) { return r.json(); })
-    .then(function (st) { S.engine = st; render(); })
-    .catch(function () { S.engine = {available: false, reason: 'No EnergyPlus service (page opened without python server.py).'}; render(); });
+  S.engine = window.EPBrowser && window.EPBrowser.supported()
+    ? {available: true, version: window.EPBrowser.version, where: 'browser'}
+    : {available: false, reason: 'EnergyPlus runs in the browser and needs a current Chrome, Edge, Firefox or Safari.'};
+  render();
 })();
