@@ -453,7 +453,8 @@
     });
     h += '</details>';
     h += '<div class="actions"><button class="btn" id="b-reset" type="button">Reset to defaults</button></div>';
-    document.getElementById('inputs').innerHTML = h;
+    var el = document.getElementById('inputs');
+    if (el) el.innerHTML = h;
   }
 
   function energyField(k, label, step, unit) {
@@ -464,17 +465,9 @@
 
   // ── Rendering: shared pieces ────────────────────────────────────────────
   function renderStatus() {
-    var mk = modelKeyFor(S.type, S.station), e = S.engine, m = mk && SUR_INDEX[mk], h = '';
-    if (e === null) h += '<span class="pill"><span class="dot"></span>EnergyPlus: checking…</span>';
-    else if (e.available) h += '<span class="pill ok" title="EnergyPlus runs in this browser; nothing to install"><span class="dot"></span>EnergyPlus ' + esc(e.version) + ' in browser</span>';
-    else h += '<span class="pill off" title="' + esc(e.reason || '') + '"><span class="dot"></span>EnergyPlus unavailable</span>';
-    if (m) {
-      var passed = !(m.holdout && m.holdout.passed === false);
-      h += '<span class="pill ' + (passed ? 'ok' : 'off') + '"><span class="dot"></span>Instant estimates: ' +
-        (passed ? 'tested' : 'not used here') + '</span>';
-    } else h += '<span class="pill off"><span class="dot"></span>Instant estimates: none for this type/station</span>';
-    h += '<div class="units-toggle" role="group" aria-label="Units"><button type="button" data-units="ip"' + (isIP() ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') +
-      '>IP</button><button type="button" data-units="si"' + (!isIP() ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + '>SI</button></div>';
+    var h = '<div class="units-toggle" role="group" aria-label="Units">' +
+      '<button type="button" data-units="ip" aria-pressed="' + isIP() + '"' + (isIP() ? ' class="on"' : '') + '>US units</button>' +
+      '<button type="button" data-units="si" aria-pressed="' + !isIP() + '"' + (!isIP() ? ' class="on"' : '') + '>Metric</button></div>';
     document.getElementById('status').innerHTML = h;
   }
 
@@ -1445,10 +1438,136 @@
       }
       h += designConditionsCard() + assumptionsCard();
     }
-    document.getElementById('results').innerHTML = h;
+    var el = document.getElementById('results');
+    if (el) el.innerHTML = h;
   }
 
-  function render() { renderStatus(); renderResults(); save(); }
+  function render() { renderStatus(); renderView(); save(); }
+
+  // ── Views (hash routing: #start, #inputs, #results) ─────────────────────
+  var VIEWS = ['start', 'inputs', 'results'];
+  function currentView() {
+    var v = (location.hash || '').replace('#', '');
+    return VIEWS.indexOf(v) >= 0 ? v : 'start';
+  }
+  function renderSteps(v) {
+    var labels = {start: 'Choose building', inputs: 'Describe it', results: 'Results'};
+    document.getElementById('steps').innerHTML = '<ol>' + VIEWS.map(function (k, i) {
+      var cur = k === v;
+      return '<li><a href="#' + k + '"' + (cur ? ' aria-current="step" class="on"' : '') + '><span class="n">' + (i + 1) + '</span>' +
+        labels[k] + '</a></li>';
+    }).join('') + '</ol>';
+  }
+  function renderView() {
+    var v = currentView(), el = document.getElementById('view');
+    renderSteps(v);
+    if (v === 'start') {
+      el.innerHTML = startView();
+    } else {
+      // Interim (steps 3-5 replace these): today's panels inside the new frame.
+      if (!document.getElementById('results')) {
+        el.innerHTML = '<div class="layout"><aside class="inputs" id="inputs" aria-label="Design inputs"></aside>' +
+          '<section class="results" id="results" aria-live="polite"></section></div>';
+        renderInputs();
+      }
+      renderResults();
+    }
+    el.setAttribute('data-view', v);
+  }
+  function route() {
+    var el = document.getElementById('view');
+    el.innerHTML = '';                         // views rebuild their own panels
+    render();
+    var go = null;
+    try { go = sessionStorage.getItem('scrollTo'); sessionStorage.removeItem('scrollTo'); } catch (x) { /* no storage */ }
+    var t = go && document.getElementById(go);
+    if (t) t.scrollIntoView(); else window.scrollTo(0, 0);
+  }
+
+  // Building-type presentation: category, one-line description and icon.
+  // The archetypes carry none of these, so they live here; a type without an
+  // entry still shows (generic icon, "Other").
+  var TYPE_UI = {
+    office: {cat: 'work', desc: 'Offices, desks and meeting rooms', icon: 'office'},
+    retail: {cat: 'work', desc: 'Shops and sales floors', icon: 'retail'},
+    school: {cat: 'education', desc: 'Primary and secondary classrooms', icon: 'school'},
+    higher_ed: {cat: 'education', desc: 'University teaching buildings', icon: 'college'},
+    lab: {cat: 'education', desc: 'Research labs with high fresh-air needs', icon: 'lab'},
+    healthcare: {cat: 'healthcare', desc: 'Patient rooms, occupied day and night', icon: 'health'},
+    hotel: {cat: 'living', desc: 'Guestroom floors, occupied day and night', icon: 'hotel'},
+    sports: {cat: 'venues', desc: 'Gyms and sports halls', icon: 'sports'},
+    stadium: {cat: 'venues', desc: 'Enclosed arenas with spectator seating', icon: 'stadium'}
+  };
+  var TYPE_CATS = [['all', 'All'], ['work', 'Work & commercial'], ['education', 'Education'], ['healthcare', 'Healthcare'],
+    ['living', 'Living'], ['venues', 'Sports & venues'], ['other', 'Other']];
+  var ICONS = {
+    building: '<path d="M6 28V6h14v22M20 12h6v16M10 11h2M14 11h2M10 16h2M14 16h2M10 21h2M14 21h2M3 28h26"/>',
+    office: '<path d="M5 28V5h16v23M21 11h6v17M9 10h2M15 10h2M9 15h2M15 15h2M9 20h2M15 20h2M3 28h26M12 28v-4h2v4"/>',
+    retail: '<path d="M6 11h20l-2 17H8L6 11zM11 11V8a5 5 0 0 1 10 0v3"/>',
+    school: '<path d="M4 14l12-7 12 7M7 13v15h18V13M13 28v-6h6v6M16 12v3"/>',
+    college: '<path d="M2 12l14-6 14 6-14 6-14-6zM8 15v7c0 2 4 4 8 4s8-2 8-4v-7M28 12v8"/>',
+    lab: '<path d="M12 4h8M13 4v9L6 26a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2l-7-13V4M9 20h14"/>',
+    health: '<path d="M5 28V8h22v20M3 28h26M14 12h4v4h4v4h-4v4h-4v-4h-4v-4h4z"/>',
+    hotel: '<path d="M3 26V8M3 20h26v6M3 15h8v5M13 15h12a4 4 0 0 1 4 4v1"/>',
+    sports: '<circle cx="16" cy="16" r="11"/><path d="M5 16h22M16 5c4 3 4 19 0 22M16 5c-4 3-4 19 0 22"/>',
+    stadium: '<path d="M3 13c0-3 6-5 13-5s13 2 13 5v10c0 3-6 5-13 5S3 26 3 23V13zM3 13c0 3 6 5 13 5s13-2 13-5"/>'
+  };
+  function icon(name, cls) {
+    return '<svg class="' + (cls || 'ico') + '" viewBox="0 0 32 32" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round">' + (ICONS[name] || ICONS.building) + '</svg>';
+  }
+  var SNOW = '<svg class="ico-s" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v20M3.3 7l17.4 10M3.3 17L20.7 7M9 4l3 3 3-3M9 20l3-3 3 3"/></svg>';
+  var FLAME = '<svg class="ico-s" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 22c4 0 7-3 7-7 0-5-4-7-5-12-3 2-4 5-4 7-1-1-2-2-2-4-2 2-3 5-3 9 0 4 3 7 7 7z"/></svg>';
+
+  // ASHRAE 169 climate zone descriptors: thermal (1-8) and moisture (A/B/C).
+  var ZONE_TEMP = {1: 'very hot', 2: 'hot', 3: 'warm', 4: 'mixed', 5: 'cool', 6: 'cold', 7: 'very cold', 8: 'subarctic'};
+  var ZONE_MOIST = {A: 'humid', B: 'dry', C: 'marine'};
+  function climateNote(z) {
+    var t = ZONE_TEMP[z.charAt(0)], m = ZONE_MOIST[z.charAt(1)];
+    return 'Climate zone ' + z + ': ' + (t || '') + (m ? ', ' + m : '') + ' (ASHRAE 169).';
+  }
+
+  function startView() {
+    var types = D.archetypes.types, cat = S.typeCat || 'all';
+    var keys = Object.keys(types);
+    var used = {};
+    keys.forEach(function (k) { used[(TYPE_UI[k] || {}).cat || 'other'] = true; });
+    var h = '<div class="wrap">';
+    h += '<section class="hero"><div class="hero-text"><h1>How much heating and cooling will your building need?</h1>' +
+      '<p class="lead">Describe your building and where it is. The tool works out the peak heating and cooling the HVAC equipment must be ' +
+      'sized for, and shows what drives it, using EnergyPlus.</p></div>' +
+      '<div class="hero-cards"><div class="hc cool">' + SNOW + '<div><b>Cooling</b><span>sized for the hottest summer afternoon</span></div></div>' +
+      '<div class="hc heat">' + FLAME + '<div><b>Heating</b><span>sized for the coldest winter night</span></div></div></div></section>';
+    h += '<section class="how" id="how" aria-labelledby="how-title"><h2 id="how-title">How it works</h2><ol class="how-steps">' +
+      '<li><span class="n">1</span><b>Describe your building.</b><span>Typical values are filled in for the type and location; change only what you know.</span></li>' +
+      '<li><span class="n">2</span><b>We test it on extreme days.</b><span>An instant estimate right away, and a full EnergyPlus run in about 4 seconds when you want it.</span></li>' +
+      '<li><span class="n">3</span><b>See what drives the size.</b><span>Where the load comes from, and the changes that would shrink the equipment most.</span></li></ol></section>';
+    h += '<section class="card start-card" aria-labelledby="gs-title"><h2 id="gs-title">Get started</h2>';
+    h += '<fieldset class="q"><legend>What kind of building is it?</legend>';
+    h += '<div class="chips" role="group" aria-label="Filter building types">' + TYPE_CATS.filter(function (c) {
+      return c[0] === 'all' || used[c[0]];
+    }).map(function (c) {
+      return '<button type="button" class="chip' + (cat === c[0] ? ' on' : '') + '" aria-pressed="' + (cat === c[0]) + '" data-cat="' + c[0] + '">' + esc(c[1]) + '</button>';
+    }).join('') + '</div>';
+    h += '<div class="tiles">' + keys.filter(function (k) {
+      return cat === 'all' || ((TYPE_UI[k] || {}).cat || 'other') === cat;
+    }).map(function (k) {
+      var u = TYPE_UI[k] || {}, on = k === S.type;
+      return '<button type="button" class="tile' + (on ? ' on' : '') + '" aria-pressed="' + on + '" data-type="' + k + '">' +
+        icon(u.icon) + '<span class="t-name">' + esc(types[k].label) + '</span>' +
+        (u.desc ? '<span class="t-desc">' + esc(u.desc) + '</span>' : '') + (on ? '<span class="t-check">Selected</span>' : '') + '</button>';
+    }).join('') + '</div></fieldset>';
+    var st = stationById(S.station);
+    h += '<div class="q loc"><label for="f-station">Where is it?</label><div class="loc-row"><select id="f-station">' +
+      D.stations.map(function (s) {
+        return '<option value="' + s.id + '"' + (s.id === S.station ? ' selected' : '') + '>' + esc(s.label) + '</option>';
+      }).join('') + '</select><p class="climate">' + esc(climateNote(st.climate_zone_stat)) + '</p></div>' +
+      '<p class="hint">The nearest of the weather stations with ASHRAE design data. Typical envelope values follow its climate zone.</p></div>';
+    h += '<div class="start-actions"><a class="btn primary big" href="#inputs">Next: Describe your building →</a>' +
+      '<a class="btn big" href="#results">Skip to results with typical values</a></div>';
+    h += '</section></div>';
+    return h;
+  }
 
   // ── Actions ─────────────────────────────────────────────────────────────
   function download(name, text, type) {
@@ -1534,7 +1653,11 @@
     var sg = t.parentNode.getAttribute && t.parentNode.getAttribute('data-seg');
     if (sg) { S[sg] = t.getAttribute('data-v'); render(); return; }
     if (t.getAttribute('data-tab')) { S.tab = t.getAttribute('data-tab'); render(); return; }
-    if (t.getAttribute('data-units')) { S.units = t.getAttribute('data-units'); renderStatus(); renderInputs(); render(); save(); return; }
+    if (t.getAttribute('data-type')) { S.type = t.getAttribute('data-type'); S.sc = null; resetScenario(); S.ep = null; S.baseline = null; render(); return; }
+    if (t.getAttribute('data-cat')) { S.typeCat = t.getAttribute('data-cat'); render(); return; }
+    if (t.id === 'b-help') { document.getElementById('help').showModal(); return; }
+    if (t.id === 'b-help-close') { document.getElementById('help').close(); return; }
+    if (t.getAttribute('data-units')) { S.units = t.getAttribute('data-units'); renderStatus(); renderInputs(); render(); return; }
     if (t.id === 'b-reset') { S.sc = null; S.czOverride = null; resetScenario(); renderInputs(); render(); }
     else if (t.id === 'b-run') runEnergyPlus();
     else if (t.id === 'b-annual') runAnnual();
@@ -1561,21 +1684,30 @@
 
   // ── Boot ────────────────────────────────────────────────────────────────
   if (!restore()) resetScenario();
-  renderInputs();
-  render();
-  var inputs = document.getElementById('inputs');
-  inputs.addEventListener('input', onInput);
-  inputs.addEventListener('change', onChange);
-  inputs.addEventListener('toggle', function (e) {
+  S.engine = window.EPBrowser && window.EPBrowser.supported()
+    ? {available: true, version: window.EPBrowser.version, where: 'browser'}
+    : {available: false, reason: 'EnergyPlus runs in the browser and needs a current Chrome, Edge, Firefox or Safari.'};
+  // Views are rebuilt on every route, so listen on the document.
+  document.addEventListener('input', function (e) { onInput(e); onOptInput(e); });
+  document.addEventListener('change', function (e) { onChange(e); onOptInput(e); });
+  document.addEventListener('toggle', function (e) {
     var g = e.target.getAttribute && e.target.getAttribute('data-g');
     if (g) S.open[g] = e.target.open;
+    if (e.target.id === 'opt-levers') S.opt.showLevers = e.target.open;
+    if (e.target.id === 'tech-view') S.techView = e.target.open;
   }, true);
-  document.addEventListener('click', onClick);
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[data-scroll]');
+    if (a) { try { sessionStorage.setItem('scrollTo', a.getAttribute('data-scroll')); } catch (x) { /* no storage */ }
+      if (location.hash === a.getAttribute('href')) { e.preventDefault(); route(); } }
+    onClick(e);
+  });
+  window.addEventListener('hashchange', route);
   // Optimizer inputs live in the results panel: store them without
   // re-rendering, so typing keeps focus; the search runs on "Find options".
-  var resultsEl = document.getElementById('results');
   function onOptInput(e) {
     var t = e.target, o = S.opt, k;
+    if (!t.getAttribute) return;
     if (t.id === 'f-opt-clg') o.clg = t.value;
     else if (t.id === 'f-opt-htg') o.htg = t.value;
     else if ((k = t.getAttribute('data-opt-on'))) (o.levers[k] = o.levers[k] || {}).on = t.checked;
@@ -1586,14 +1718,5 @@
       (o.levers[k] = o.levers[k] || {}).cost = isNaN(cv) ? '' : (isIP() && lu ? cv * lu.k : cv);   // stored per SI unit
     }
   }
-  resultsEl.addEventListener('input', onOptInput);
-  resultsEl.addEventListener('change', onOptInput);
-  resultsEl.addEventListener('toggle', function (e) {
-    if (e.target.id === 'opt-levers') S.opt.showLevers = e.target.open;
-    if (e.target.id === 'tech-view') S.techView = e.target.open;
-  }, true);
-  S.engine = window.EPBrowser && window.EPBrowser.supported()
-    ? {available: true, version: window.EPBrowser.version, where: 'browser'}
-    : {available: false, reason: 'EnergyPlus runs in the browser and needs a current Chrome, Edge, Firefox or Safari.'};
-  render();
+  route();
 })();
