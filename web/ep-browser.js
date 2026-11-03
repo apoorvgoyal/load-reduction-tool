@@ -41,7 +41,12 @@
         if (!window.loadPyodide) await loadScript(PYODIDE + 'pyodide.js');
         var p = await window.loadPyodide({indexURL: PYODIDE});
         await p.loadPackage('sqlite3');
-        var man = JSON.parse(await get('engine/manifest.json'));
+        var man;
+        try { man = JSON.parse(await get('engine/manifest.json')); } catch (e) {
+          throw new Error('this page\'s server does not provide the engine files (engine/manifest.json). ' +
+            'If you run it with python server.py, stop it (Ctrl+C), git pull, and start it again; ' +
+            'for a static copy, build it with python3 engine/web_files.py build-site');
+        }
         p.FS.mkdirTree('/engine/lib'); p.FS.mkdirTree('/engine/weather/epw'); p.FS.mkdirTree('/work');
         await Promise.all(man.files.map(function (f) {
           return get('engine/' + f).then(function (t) { p.FS.writeFile('/engine/' + f, t); });

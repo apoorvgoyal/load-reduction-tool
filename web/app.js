@@ -50,6 +50,18 @@
     'W/(L/s)': {si: 'W per L/s', ip: 'W per cfm', k: 1 / 2.11888, dp: 3}
   };
   function isIP() { return S.units !== 'si'; }
+  // Arrow-key / spinner step in the shown units: the SI step converted and
+  // rounded to 1, 2 or 5 × 10^n (never "any", which steps by whole units and
+  // jumps small values straight to their min or max).
+  function niceStep(x) {
+    var p = Math.pow(10, Math.floor(Math.log10(x))), m = x / p;
+    return +((m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p).toPrecision(1);
+  }
+  function dispStep(unit, step) {
+    var u = UNITS[unit];
+    if (!isIP() || !u || !(step > 0)) return step;
+    return Math.max(niceStep(step * u.k), Math.pow(10, -u.dp));
+  }
   function toIP(unit, v) { var u = UNITS[unit]; return v * u.k + (u.off || 0); }
   function fromIP(unit, v) { var u = UNITS[unit]; return (v - (u.off || 0)) / u.k; }
   // Value as shown in an input box, in the selected system.
@@ -361,8 +373,12 @@
     }
     var ul = unitLabel(unit), u = ul ? ' (' + ul + ')' : '';
     var mn = spec.min !== undefined ? toDisp(unit, spec.min) : undefined, mx = spec.max !== undefined ? toDisp(unit, spec.max) : undefined;
+    // Browsers count spinner steps from min: put min on the step grid so the
+    // arrows land on round values (the true limits are checked on entry).
+    var st = dispStep(unit, step);
+    if (mn !== undefined && st > 0) { mn = +(Math.floor(mn / st + 1e-9) * st).toFixed(6); mx = +(Math.ceil(mx / st - 1e-9) * st).toFixed(6); }
     return '<div class="field"><label for="f-' + key + '">' + esc(label) + '<span class="unit">' + esc(u) + '</span>' + vb + '</label>' +
-      '<input id="f-' + key + '" type="number" inputmode="decimal" data-k="' + key + '" step="' + (isIP() && UNITS[unit] ? 'any' : step) + '"' +
+      '<input id="f-' + key + '" type="number" inputmode="decimal" data-k="' + key + '" step="' + st + '"' +
       (mn !== undefined ? ' min="' + mn + '" max="' + mx + '"' : '') +
       ' value="' + (dv === null || dv === undefined ? '' : dv) + '">' +
       (ip ? '<span class="ip" data-ip="' + key + '">' + ip + '</span>' : '<span class="ip" data-ip="' + key + '"></span>') + hint + '</div>';
@@ -421,7 +437,7 @@
         return '<option value="' + o[0] + '"' + (E.heatSource === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
       }).join('') + '</select></div>' +
       (heatEffLabel ? energyField('heatEff', heatEffLabel, 0.01) : '') +
-      energyField('sfp', 'Fan power (' + (isIP() ? 'W per cfm' : 'W per L/s') + ' of supply air)', 'any', 'W/(L/s)') +
+      energyField('sfp', 'Fan power (' + (isIP() ? 'W per cfm' : 'W per L/s') + ' of supply air)', dispStep('W/(L/s)', 0.1), 'W/(L/s)') +
       energyField('efElec', 'Electricity carbon factor (kg CO₂e per kWh)', 0.001) +
       (E.heatSource === 'gas' ? energyField('efGas', 'Gas carbon factor (kg CO₂e per therm)', 0.01) : '') + '</details>';
     h += '<details class="grp" data-g="Plant cost"' + (S.open['Plant cost'] ? ' open' : '') + '><summary>Plant cost</summary>' +
@@ -924,6 +940,12 @@
     var u = unitOf(key);
     return isIP() && UNITS[u] ? +toIP(u, v).toFixed(UNITS[u].dp + 1) : +(+v).toFixed(3);
   }
+  function leverStep(key) {
+    var st = null;
+    GROUPS.forEach(function (g) { g.fields.forEach(function (f) { if (f[0] === key) st = f[3]; }); });
+    if (key === 'oa_multiplier') st = 0.05;
+    return dispStep(unitOf(key), st || 0.01);
+  }
   function leverFromDisp(key, v) {
     var u = unitOf(key), x = parseFloat(v);
     if (v === '' || isNaN(x)) return v;
@@ -979,8 +1001,8 @@
     levers.forEach(function (l) {
       h += '<tr><td><input type="checkbox" data-opt-on="' + l.key + '"' + (l.on ? ' checked' : '') + '></td><td>' + esc(SWEEP_LABELS[l.key]) + '</td>' +
         '<td class="num">' + sweepValue(l.key, l.v0) + '</td>' +
-        '<td><input class="opt-num" type="number" step="any" data-opt-lo="' + l.key + '" value="' + esc(leverDisp(l.key, l.lo)) + '" title="Trained range starts at ' + esc(leverDisp(l.key, l.trainedLo)) + '"></td>' +
-        '<td><input class="opt-num" type="number" step="any" data-opt-hi="' + l.key + '" value="' + esc(leverDisp(l.key, l.hi)) + '" title="Trained range ends at ' + esc(leverDisp(l.key, l.trainedHi)) + '"></td>' +
+        '<td><input class="opt-num" type="number" step="' + leverStep(l.key) + '" data-opt-lo="' + l.key + '" value="' + esc(leverDisp(l.key, l.lo)) + '" title="Trained range starts at ' + esc(leverDisp(l.key, l.trainedLo)) + '"></td>' +
+        '<td><input class="opt-num" type="number" step="' + leverStep(l.key) + '" data-opt-hi="' + l.key + '" value="' + esc(leverDisp(l.key, l.hi)) + '" title="Trained range ends at ' + esc(leverDisp(l.key, l.trainedHi)) + '"></td>' +
         '<td><input class="opt-num" type="number" min="0" step="any" data-opt-cost="' + l.key + '" value="' + esc(leverCostDisp(l.key, (o.levers[l.key] || {}).cost)) + '"></td></tr>';
     });
     h += '</tbody></table></div><p class="sub" style="margin:6px 0 0">Equipment power and occupant density start switched off (they follow ' +
