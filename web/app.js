@@ -1012,7 +1012,25 @@
     if (res.failed) h += '<div class="note warn gc-full">The trained model for this type and location missed the accuracy limit, so this plan is indicative. Check it in EnergyPlus.</div>';
     var plans = r.feasible ? [['fewest', 'Fewest changes', r.fewest], ['smallest', 'Smallest overall change', r.smallest], ['cheapest', 'Lowest cost', r.cheapest]]
       .filter(function (x) { return x[2]; }) : [['best', 'Best possible', r.bestAchievable]];
-    var pick = plans.filter(function (x) { return x[0] === S.planPick; })[0] || plans[0];
+    // Plans that come out identical are shown as one option, with both names.
+    var PLAN_WHAT = {fewest: 'changes as few inputs as possible', smallest: 'moves the inputs as little as possible in total (each move counted as the share of its range it uses), even if that means changing more of them',
+      cheapest: 'costs least, using the costs you enter under levers and ranges'};
+    var merged = [];
+    plans.forEach(function (x) {
+      var sig = JSON.stringify(r.describe(x[2]).values), same = merged.filter(function (y) { return y.sig === sig; })[0];
+      if (same) { same.ids.push(x[0]); same.names.push(x[1]); } else merged.push({sig: sig, ids: [x[0]], names: [x[1]], pt: x[2]});
+    });
+    plans = merged.map(function (y) { return [y.ids[0], y.names.length > 1 ? y.names[0] + ' = ' + y.names.slice(1).join(' = ').toLowerCase() : y.names[0], y.pt, y.ids, y.names]; });
+    var pick = plans.filter(function (x) { return x[3].indexOf(S.planPick) >= 0; })[0] || plans[0];
+    var planNote = '';
+    if (r.feasible) {
+      var nCh = function (x) { var dx = r.describe(x[2]), n = dx.moved.length; return n + ' change' + (n === 1 ? '' : 's') + ', total move ' + fmt(dx.change, 2); };
+      planNote = '<p class="sub plan-what">' + (pick[3].length > 1 ?
+        '<b>' + esc(pick[4].join(' and ')) + '</b> give the same plan here (' + nCh(pick) + '): no plan with as few changes moves the inputs less.' :
+        '<b>' + esc(pick[1]) + '</b>: the plan that ' + PLAN_WHAT[pick[0]] + '.') +
+        (plans.length > 1 ? ' ' + plans.map(function (x) { return esc(x[1]) + ': ' + nCh(x); }).join(' · ') + '. Total move adds up the share of its range each input uses.' : '') +
+        (!r.cheapest ? ' Add costs under levers and ranges to also get a lowest-cost plan.' : '') + '</p>';
+    }
     var d = r.describe(pick[2]);
     o.picks = o.picks || {}; o.picks[pick[1]] = d.values;
     var gotC = (b.clg - d.result.clg) / b.clg * 100, gotH = (b.htg - d.result.htg) / b.htg * 100;
@@ -1029,7 +1047,7 @@
     }).join('') + '</ul>';
     o.lastList = list;
     h += '<div class="gc-c"><span class="pstat ' + (okC && okH ? 'ok' : 'no') + '">' + esc(status) + '</span>' +
-      (plans.length > 1 ? seg('planPick', plans.map(function (x) { return [x[0], x[1]]; }), pick[0]) : '') +
+      (plans.length > 1 ? seg('planPick', plans.map(function (x) { return [x[0], x[1]]; }), pick[0]) : '') + planNote +
       '<div class="actions"><button class="btn" type="button" data-opt-apply="' + esc(pick[1]) + '">Apply plan (' + d.moved.length + ' change' + (d.moved.length === 1 ? '' : 's') + ')</button></div>' +
       '</div><div class="gc-d">' + list + '</div></div>';
     // For engineers: the best result with 1, 2, 3 … changes.
@@ -1781,9 +1799,11 @@
     var w = cool ? g.clg : g.htg, v = cool ? capC(w) : capH(w), dp = cool && isIP() ? 1 : 0, unit = cool ? uC() : uH();
     h += '<div class="ac-num">' + fmt(v, dp) + '<span>' + unit + '</span></div><p class="ac-when">' + esc(peakPhrase(cool ? g.cKey : g.hKey, cool ? g.time : g.hTime)) + '</p>';
     if (ref) {
-      var rv = cool ? capC(ref.clg) : capH(ref.htg), d = v - rv;
+      var rv = cool ? capC(ref.clg) : capH(ref.htg), d = v - rv, c0 = plantCost(kind, cool ? ref.clg : ref.htg), c1 = plantCost(kind, w);
+      var dc = c0 != null && c1 != null ? c1 - c0 : null;
       h += Math.abs(d) < Math.pow(10, -dp) / 2 ? '<span class="dchip same">Same as ' + refName + '</span>' :
-        '<span class="dchip ' + (d < 0 ? 'down' : 'up') + '">' + (d < 0 ? '▼ ' : '▲ ') + fmt(Math.abs(d), dp) + ' ' + unit + (d < 0 ? ' smaller' : ' bigger') + ' than ' + refName + '</span>';
+        '<span class="dchip ' + (d < 0 ? 'down' : 'up') + '">' + (d < 0 ? '▼ ' : '▲ ') + fmt(Math.abs(d), dp) + ' ' + unit +
+        (dc != null && Math.round(dc) !== 0 ? ' · ' + (dc < 0 ? '−' : '+') + '$' + fmt(Math.abs(dc), 0) + ' vs ' : (d < 0 ? ' smaller' : ' bigger') + ' than ') + refName + '</span>';
     }
     var c = plantCost(kind, w);
     h += '<p class="ac-cost">Equipment cost: ' + (c != null ? '<b>$' + fmt(c, 0) + '</b>' : '<span>add a rate on the left</span>') + '</p></div>';
@@ -1804,7 +1824,9 @@
       var chip = '';
       if (ref) {
         var d = v - (cool ? capC(ref.clg) : capH(ref.htg));
-        chip = Math.abs(d) < Math.pow(10, -dp) / 2 ? '' : '<span class="dchip ' + (d < 0 ? 'down' : 'up') + '">' + (d < 0 ? '▼ ' : '▲ ') + fmt(Math.abs(d), dp) + ' vs ' + refName + '</span>';
+        var c0 = plantCost(kind, cool ? ref.clg : ref.htg), c1 = plantCost(kind, w), dc = c0 != null && c1 != null ? c1 - c0 : null;
+        chip = Math.abs(d) < Math.pow(10, -dp) / 2 ? '' : '<span class="dchip ' + (d < 0 ? 'down' : 'up') + '">' + (d < 0 ? '▼ ' : '▲ ') + fmt(Math.abs(d), dp) +
+          (dc != null && Math.round(dc) !== 0 ? ' · ' + (dc < 0 ? '−' : '+') + '$' + fmt(Math.abs(dc), 0) : '') + ' vs ' + refName + '</span>';
       }
       var bd = groupedBreakdown(kind, g), bar = '';
       if (bd) {
@@ -1874,12 +1896,9 @@
     var ref = b, refName = 'your baseline';
     if (!ref && g && g.source === 'surrogate') { ref = typicalResult(); refName = 'typical'; }
     var m = SUR[modelKeyFor(S.type, S.station)], ho = m && m.holdout, engineOn = S.engine && S.engine.available, ep = g && g.source === 'energyplus';
-    var cc = g ? plantCost('cooling', g.clg) : null, hc = g ? plantCost('heating', g.htg) : null;
-    var tot = cc != null || hc != null ? '$' + fmt((cc || 0) + (hc || 0), 0) : '—';
     var h = '<div class="wrap rp"><div class="rp-head"><h2 class="rp-title">Results</h2>' +
       (g ? '<span class="badge-src ' + (ep ? 'ep' : 'sur') + '">' + (ep ? 'Full simulation · EnergyPlus' : 'Instant estimate' +
         (ho && ho.worst_governing_p95_pct != null ? ' · within ~' + fmt(Math.ceil(ho.worst_governing_p95_pct), 0) + '%' : '')) + '</span>' : '<span class="badge-src none">No instant estimate</span>') +
-      '<span class="tot">Total equipment cost: <b>' + tot + '</b></span>' +
       '<span class="ws-sp"></span>' +
       '<button type="button" class="btn" id="b-run"' + (engineOn && !S.running ? '' : ' disabled') + '>' +
       (S.running ? esc(S.engineMsg || 'Running EnergyPlus…') : (ep ? 'Re-run full simulation' : 'Run full simulation · ~4 sec')) + '</button>' +
@@ -1904,6 +1923,9 @@
       '<p><b>Apply</b> sets the change on the left.</p>');
     if (g) h += row(optimizerCard(g), 'Set a goal',
       '<p>Enter how much smaller you want each peak. The tool searches combinations of changes in the trained model and suggests a plan.</p>' +
+      '<p><b>Fewest changes</b> touches as few inputs as possible; <b>smallest overall change</b> moves them as little as possible in total, ' +
+      'sometimes by changing more of them. When both give the same plan, they show as one.</p>' +
+      '<p>Choose which inputs the tool may change, and how far, under <b>For engineers: levers and ranges</b> in this card. Add costs there to get a lowest-cost plan.</p>' +
       '<p><b>Apply plan</b> sets them on the left; then Run full simulation to check it in EnergyPlus.</p>');
     h += row(yearlyCard(), 'Yearly energy & carbon',
       '<p>A full-year EnergyPlus run on the location\'s typical-year weather.</p>' +
