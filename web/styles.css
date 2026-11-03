@@ -787,3 +787,27 @@ details.factors .field input, details.factors .field select { font: 600 15px var
 .gc-d ul.checklist li { grid-template-columns: 26px minmax(0, 1fr) auto auto; gap: 6px 18px; }
 .gc-c { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
 .gc-c .sub { flex-basis: 100%; }
+
+/* Results header: fixed at the top of the results pane; shows the peaks once the cards scroll away */
+.rp-head { position: sticky; top: 0; z-index: 3; background: var(--ground); margin: -20px -24px 0; padding: 14px 24px 12px;
+  border-bottom: 1px solid transparent; }
+.rp-head.stuck { border-bottom-color: var(--line); }
+.rp-mini { display: none; align-items: center; gap: 14px; font-weight: 800; font-size: 17px; font-variant-numeric: tabular-nums; }
+.rp-mini span { display: inline-flex; align-items: center; gap: 6px; }
+.rp-mini .cool { color: var(--cool-ink); } .rp-mini .heat { color: var(--heat-ink); }
+.rp-head.stuck .rp-mini { display: inline-flex; }
+@media (max-width: 900px) {
+  .rp-head { top: 48px; margin: -16px -12px 0; padding: 10px 12px; }
+}
+@media (max-width: 900px) {
+  .rp-head.stuck .tot, .rp-head.stuck .badge-src { display: none; }
+  .rp-head.stuck .rp-title { font-size: 18px; }
+  .rp-head.stuck .btn { min-height: 44px; padding: 0 12px; font-size: 14px; }
+}
+@media (max-width: 600px) {
+  ol.ranked li { grid-template-columns: 32px minmax(0, 1fr) auto; }
+  ol.ranked li .rk-text { grid-column: 2 / -1; }
+  ol.ranked li .rk-bar { grid-column: 2 / -1; }
+  ol.ranked li .rk-val { grid-column: 2; flex-direction: row; align-items: baseline; gap: 8px; justify-self: start; }
+  ol.ranked li .btn { grid-column: 3; justify-self: end; }
+}

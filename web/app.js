@@ -1387,6 +1387,7 @@
         var yi = pin ? pin.scrollTop : 0, po = document.getElementById('pane-out'), yo = po ? po.scrollTop : 0;
         el.innerHTML = workspaceView();
         if (pin) { document.getElementById('pane-in').scrollTop = yi; document.getElementById('pane-out').scrollTop = yo; }
+        watchPeaks();
       } else if (S.rightOnly) refreshRight();
       else refreshInputs();
       S.rebuild = false; S.rightOnly = false;
@@ -1851,7 +1852,10 @@
     var h = '<div class="wrap rp"><div class="rp-head"><h2 class="rp-title">Results</h2>' +
       (g ? '<span class="badge-src ' + (ep ? 'ep' : 'sur') + '">' + (ep ? 'Full simulation · EnergyPlus' : 'Instant estimate' +
         (ho && ho.worst_governing_p95_pct != null ? ' · within ~' + fmt(Math.ceil(ho.worst_governing_p95_pct), 0) + '%' : '')) + '</span>' : '<span class="badge-src none">No instant estimate</span>') +
-      '<span class="tot">Total equipment cost: <b>' + tot + '</b></span><span class="ws-sp"></span>' +
+      '<span class="tot">Total equipment cost: <b>' + tot + '</b></span>' +
+      (g ? '<span class="rp-mini" aria-hidden="true"><span class="cool">' + SNOW + fmt(capC(g.clg), isIP() ? 1 : 0) + ' ' + uC() + '</span>' +
+        '<span class="heat">' + FLAME + fmt(capH(g.htg), 0) + ' ' + uH() + '</span></span>' : '') +
+      '<span class="ws-sp"></span>' +
       '<button type="button" class="btn" id="b-run"' + (engineOn && !S.running ? '' : ' disabled') + '>' +
       (S.running ? esc(S.engineMsg || 'Running EnergyPlus…') : (ep ? 'Re-run full simulation' : 'Run full simulation · ~4 sec')) + '</button></div>';
     if (!engineOn) h += '<p class="sub">' + esc((S.engine && S.engine.reason) || '') + '</p>';
@@ -1886,7 +1890,16 @@
     if (po) { var y = po.scrollTop; po.innerHTML = rightPane(); po.scrollTop = y; }
     var tl = document.getElementById('tab-results');
     if (tl) tl.textContent = tabLabel();
+    watchPeaks();
   }
+  // The results header stays at the top of the pane; once the answer cards
+  // have scrolled away it also shows the two peaks, so they stay in view.
+  function watchPeaks() {
+    var head = document.querySelector('.rp-head'), card = document.querySelector('.acard.heat');
+    if (!head || !card) return;
+    head.classList.toggle('stuck', card.getBoundingClientRect().bottom < head.getBoundingClientRect().bottom);
+  }
+
   function refreshInputs() {
     SECTIONS.concat([COST_SEC]).forEach(function (sec) { var st = sectionStatus(sec); setStatus(sec.id, st); });
     Object.keys(S.custom).forEach(function (k) {
@@ -2172,6 +2185,9 @@
     onClick(e);
   });
   window.addEventListener('hashchange', route);
+  // Results pane scrolls on its own on desktop, with the page on a phone.
+  document.addEventListener('scroll', function () { watchPeaks(); }, true);
+  window.addEventListener('resize', function () { watchPeaks(); });
   // Optimizer inputs live in the results panel: store them without
   // re-rendering, so typing keeps focus; the search runs on "Find options".
   function onOptInput(e) {
