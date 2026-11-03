@@ -4,25 +4,42 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Peak Load Tool</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Open+Sans:wght@700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <header class="top">
-  <div class="brand">
-    <div class="brand-title">Peak Load Tool</div>
-    <div class="brand-sub">Heating &amp; cooling design loads from EnergyPlus, on ASHRAE design days</div>
-  </div>
-  <div class="status" id="status"></div>
+  <a class="brand" href="#start" aria-label="Peak Load Tool, start page">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" fill="#15202B"/><path d="M9 22V12l7-4 7 4v10" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="M13 22v-5h6v5" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>
+    <span class="brand-title">Peak Load Tool</span>
+  </a>
+  <nav class="top-links" aria-label="Help">
+    <a href="#start" data-scroll="how">How it works</a>
+    <button type="button" class="linklike" id="b-help">Help &amp; glossary</button>
+  </nav>
+  <div class="top-right" id="status"></div>
 </header>
 
-<main class="layout">
-  <aside class="inputs" id="inputs" aria-label="Design inputs"></aside>
-  <section class="results" id="results" aria-live="polite"></section>
-</main>
+<main id="view" aria-live="polite"></main>
+
+<dialog id="help" aria-labelledby="help-title">
+  <div class="dlg-head"><h2 id="help-title">Help &amp; glossary</h2><button type="button" class="btn" id="b-help-close">Close</button></div>
+  <dl class="gloss">
+    <dt>Peak load</dt><dd>The most heating or cooling the building needs in any one hour on an extreme design day. The plant is sized for it.</dd>
+    <dt>Design day</dt><dd>An extreme day from ASHRAE's climate data for the weather station: hot (cooling) or cold (heating). "0.4%" means only 0.4% of the hours in a typical year are hotter; "99.6%" means only 0.4% are colder.</dd>
+    <dt>Ton (of cooling)</dt><dd>12,000 Btu per hour, or 3.517 kW. The usual US unit for cooling plant size.</dd>
+    <dt>MBH</dt><dd>1,000 Btu per hour, or 0.293 kW. The usual US unit for heating plant size.</dd>
+    <dt>Instant estimate</dt><dd>A model trained on hundreds of EnergyPlus runs for this building type and location. It answers instantly; its tested accuracy is shown with every result.</dd>
+    <dt>Full simulation</dt><dd>EnergyPlus, the US Department of Energy's building energy simulation engine, run on your exact inputs in your browser.</dd>
+  </dl>
+</dialog>
 
 <script src="data/loads-data.js"></script>
 <!-- Created by engine/fit_surrogate.py once training runs exist; absent until then. -->
 <script src="data/loads-surrogate.js" onerror="window.LOADS_SURROGATE=null"></script>
+<script src="data/presets.js"></script>
 <script src="core.js"></script>
 <script src="ep-browser.js"></script>
 <script src="app.js"></script>
