@@ -779,3 +779,7 @@ details.factors .field input, details.factors .field select { font: 600 15px var
 .cond-l { font-size: 12px; font-weight: 700; color: var(--muted); }
 .seg.mini { align-self: flex-start; padding: 2px; }
 .seg.mini button { min-height: 44px; padding: 0 10px; font-size: 13px; }
+.acard { align-items: center; }
+.ac-right { justify-content: center; }
+.cond-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 24px; margin: 4px 0 6px; }
+.cond-t { font-weight: 800; align-self: center; }

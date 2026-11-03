@@ -1759,8 +1759,7 @@
         '<div class="ac-right"><div class="ac-rt">Where it comes from</div><p class="sub">Appears with the result.</p></div></article>';
     }
     var w = cool ? g.clg : g.htg, v = cool ? capC(w) : capH(w), dp = cool && isIP() ? 1 : 0, unit = cool ? uC() : uH();
-    h += '<div class="ac-num">' + fmt(v, dp) + '<span>' + unit + '</span></div><p class="ac-when">' + esc(peakPhrase(cool ? g.cKey : g.hKey, cool ? g.time : g.hTime)) + '</p>' +
-      condPicker(kind);
+    h += '<div class="ac-num">' + fmt(v, dp) + '<span>' + unit + '</span></div><p class="ac-when">' + esc(peakPhrase(cool ? g.cKey : g.hKey, cool ? g.time : g.hTime)) + '</p>';
     if (ref) {
       var rv = cool ? capC(ref.clg) : capH(ref.htg), d = v - rv;
       h += Math.abs(d) < Math.pow(10, -dp) / 2 ? '<span class="dchip same">Same as ' + refName + '</span>' :
@@ -1773,7 +1772,7 @@
   // Design condition per load: how extreme a design day to size for.
   function condPicker(kind) {
     var cool = kind === 'cooling';
-    return '<div class="cond"><span class="cond-l" id="cond-' + kind + '">Design condition</span>' +
+    return '<div class="cond"><span class="cond-l" id="cond-' + kind + '">' + (cool ? 'Cooling' : 'Heating') + '</span>' +
       seg(cool ? 'coolPct' : 'heatPct', cool ? [['0.4', '0.4%'], ['1', '1%'], ['2', '2%']] : [['99.6', '99.6%'], ['99', '99%']], cool ? S.coolPct : S.heatPct)
         .replace('class="seg"', 'class="seg mini" role="group" aria-labelledby="cond-' + kind + '"') + '</div>';
   }
@@ -1859,7 +1858,8 @@
     h += yearlyCard();
     h += '<details class="card eng" id="eng"' + (S.open.eng ? ' open' : '') + '><summary><h2>For engineers: detailed data</h2>' +
       '<span class="sub">Design conditions, airflow, outdoor-air loads, every design day, profiles, zone sizing, defaults, the two-sided sensitivity chart, yearly end uses and downloads.</span></summary>' +
-      '<p class="sub">The design condition is set on each result card above.</p>';
+      '<div class="cond-row"><span class="cond-t">Design condition</span>' + condPicker('cooling') + condPicker('heating') + '</div>' +
+      '<p class="sub">How extreme a design day the equipment is sized for. Applies to every result on this page.</p>';
     if (g) {
       h += '<div class="card"><h2>Peak load detail</h2><p class="sub">Selected condition: cooling ' + S.coolPct + '%, heating ' + S.heatPct + '%.</p>' + detailKpis(g, b) + compareTable(g, b) + '</div>';
       h += designDayCard(g, b);
