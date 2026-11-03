@@ -211,7 +211,7 @@
     epSens: null, epSensRunning: null, epSensError: null,
     opt: {clg: '', htg: '', levers: {}, result: null, showLevers: false},
     energy: {cop: '', heatSource: 'gas', heatEff: '', sfp: '', efElec: '', efGas: ''}, annual: null, annualRunning: false, annualError: null,
-    engine: null, running: false, runError: null};
+    engine: null, running: false, runError: null, custom: {}, rebuild: false};
 
   function stationById(id) {
     for (var i = 0; i < D.stations.length; i++) if (D.stations[i].id === id) return D.stations[i];
@@ -398,6 +398,8 @@
   }
 
   function renderInputs() {
+    S.rebuild = true;                      // the Inputs view rebuilds on its next render
+    if (!document.getElementById('inputs')) return;
     var st = stationById(S.station), h = '', zone = S.czOverride || stationZone();
     var types = D.archetypes.types;
     h += '<div class="panel-head"><div class="step">Building</div>';
@@ -416,20 +418,30 @@
       var op = S.open[g.title] === undefined ? g.open : S.open[g.title];
       h += '<details class="grp" data-g="' + esc(g.title) + '"' + (op ? ' open' : '') + '><summary>' + esc(g.title) + '</summary>';
       groupFields(g).forEach(function (f) { h += fieldHtml(f[0], f[1], f[2], f[3]); });
-      if (g.title === 'Advanced') {
-        h += '<div class="field"><label for="f-cz">Code climate zone (envelope defaults)</label><select id="f-cz">' +
-          '<option value="">From weather file (' + esc(stationZone()) + ')</option>' +
-          envZones().map(function (z) {
-            return '<option value="' + z + '"' + (z === S.czOverride ? ' selected' : '') + '>' + z + '</option>';
-          }).join('') + '</select><span class="hint">Only if the project\'s county zone (ASHRAE 169) differs from the ' +
-          'zone computed from the weather data (' + esc(st.climate_zone_stat) + '). Changing it resets the envelope defaults.</span></div>';
-      }
+      if (g.title === 'Advanced') h += czFieldHtml();
       h += '</details>';
     });
+    h += '<details class="grp" data-g="Energy and carbon"' + (S.open['Energy and carbon'] ? ' open' : '') + '><summary>Energy and carbon</summary>' +
+      energyHtml() + '</details>';
+    h += '<details class="grp" data-g="Plant cost"' + (S.open['Plant cost'] ? ' open' : '') + '><summary>Plant cost</summary>' +
+      plantHtml() + '</details>';
+    h += '<div class="actions"><button class="btn" id="b-reset" type="button">Reset to defaults</button></div>';
+    var el = document.getElementById('inputs');
+    if (el) el.innerHTML = h;
+  }
+
+  function czFieldHtml() {
+    return '<div class="field"><label for="f-cz">Code climate zone (envelope defaults)</label><select id="f-cz">' +
+      '<option value="">From weather file (' + esc(stationZone()) + ')</option>' +
+      envZones().map(function (z) {
+        return '<option value="' + z + '"' + (z === S.czOverride ? ' selected' : '') + '>' + z + '</option>';
+      }).join('') + '</select><span class="hint">Only if the project\'s county zone (ASHRAE 169) differs from the ' +
+      'zone computed from the weather data (' + esc(stationById(S.station).climate_zone_stat) + '). Changing it resets the envelope defaults.</span></div>';
+  }
+  function energyHtml() {
     var E = S.energy, heatEffLabel = E.heatSource === 'gas' ? 'Boiler efficiency (fraction, e.g. 0.9)' :
       (E.heatSource === 'heatpump' ? 'Heat pump heating COP' : '');
-    h += '<details class="grp" data-g="Energy and carbon"' + (S.open['Energy and carbon'] ? ' open' : '') + '><summary>Energy and carbon</summary>' +
-      '<p class="sub">Used to turn the annual run\'s heating and cooling into electricity and gas, and those into carbon. ' +
+    return '<p class="sub">Used to turn the annual run\'s heating and cooling into electricity and gas, and those into carbon. ' +
       'Your values: the tool has no built-in efficiencies or emission factors.</p>' +
       energyField('cop', 'Cooling plant COP (kW cooling per kW electric)', 0.1) +
       '<div class="field"><label for="f-e-heatSource">Heating source</label><select id="f-e-heatSource">' +
@@ -439,9 +451,10 @@
       (heatEffLabel ? energyField('heatEff', heatEffLabel, 0.01) : '') +
       energyField('sfp', 'Fan power (' + (isIP() ? 'W per cfm' : 'W per L/s') + ' of supply air)', dispStep('W/(L/s)', 0.1), 'W/(L/s)') +
       energyField('efElec', 'Electricity carbon factor (kg CO₂e per kWh)', 0.001) +
-      (E.heatSource === 'gas' ? energyField('efGas', 'Gas carbon factor (kg CO₂e per therm)', 0.01) : '') + '</details>';
-    h += '<details class="grp" data-g="Plant cost"' + (S.open['Plant cost'] ? ' open' : '') + '><summary>Plant cost</summary>' +
-      '<p class="sub">Your installed-cost rates per plant type. The tool has no built-in cost data.</p>';
+      (E.heatSource === 'gas' ? energyField('efGas', 'Gas carbon factor (kg CO₂e per therm)', 0.01) : '');
+  }
+  function plantHtml() {
+    var h = '<p class="sub">Your installed-cost rates per plant type. The tool has no built-in cost data.</p>';
     ['cooling', 'heating'].forEach(function (kind) {
       var unit = isIP() ? (kind === 'cooling' ? '$ per ton' : '$ per MBH') : '$ per kW', cur = S.plant[kind];
       h += '<div class="field wide"><label for="f-plant-' + kind + '">' + (kind === 'cooling' ? 'Cooling plant' : 'Heating plant') + '</label>' +
@@ -451,10 +464,7 @@
         '<div class="field"><label for="f-rate-' + kind + '">' + esc(cur) + ' (' + unit + ')</label>' +
         '<input id="f-rate-' + kind + '" type="number" min="0" step="10" value="' + esc(rateToDisp(kind, S.rates[kind][cur] || '')) + '"></div>';
     });
-    h += '</details>';
-    h += '<div class="actions"><button class="btn" id="b-reset" type="button">Reset to defaults</button></div>';
-    var el = document.getElementById('inputs');
-    if (el) el.innerHTML = h;
+    return h;
   }
 
   function energyField(k, label, step, unit) {
@@ -1463,6 +1473,13 @@
     renderSteps(v);
     if (v === 'start') {
       el.innerHTML = startView();
+    } else if (v === 'inputs') {
+      if (!document.getElementById('iv') || S.rebuild) {
+        var y = window.scrollY;
+        el.innerHTML = inputsView();
+        if (S.rebuild) window.scrollTo(0, y);
+      } else refreshInputs();
+      S.rebuild = false;
     } else {
       // Interim (steps 3-5 replace these): today's panels inside the new frame.
       if (!document.getElementById('results')) {
@@ -1477,6 +1494,7 @@
   function route() {
     var el = document.getElementById('view');
     el.innerHTML = '';                         // views rebuild their own panels
+    S.rebuild = false;
     render();
     var go = null;
     try { go = sessionStorage.getItem('scrollTo'); sessionStorage.removeItem('scrollTo'); } catch (x) { /* no storage */ }
@@ -1569,6 +1587,206 @@
     return h;
   }
 
+  // ── Inputs view: one page of plain-language questions ──────────────────
+  // One generic renderer, driven by this config. kind 'number' = a value box;
+  // otherwise presets (data/presets.js) plus Typical (the archetype default)
+  // and Custom. fx: which peak the input moves (cool, heat, both, none).
+  var SECTIONS = [
+    {id: 'size', title: 'Size & shape', desc: 'How big the building is and how it sits on the site.', qs: [
+      {k: 'gfa_m2', label: 'Total floor area', tech: 'Gross floor area', fx: 'both', kind: 'number'},
+      {k: 'n_floors', label: 'Number of floors', tech: 'Floors above grade', fx: 'both', kind: 'number'},
+      {k: 'aspect_ratio', label: 'Floor plan shape', tech: 'Plan aspect ratio (length ÷ width)', fx: 'both'},
+      {k: 'north_axis_deg', label: 'Which way the long sides face', tech: 'Rotation of the long axis from east', fx: 'cool'}]},
+    {id: 'envelope', title: 'Walls & windows', desc: 'How much glass there is, and how well walls, roof and windows keep heat and sun out.', qs: [
+      {k: 'wwr', label: 'How much of the wall is glass', tech: 'Window-to-wall ratio', fx: 'both', sketch: true},
+      {k: 'win_u', label: 'How well the windows keep heat in', tech: 'Window U-factor (assembly)', fx: 'both'},
+      {k: 'shgc', label: 'How much sun heat the windows let in', tech: 'Solar heat gain coefficient (SHGC)', fx: 'cool'},
+      {k: 'overhang_pf', label: 'Shading over the windows', tech: 'Overhang projection factor', fx: 'cool'},
+      {k: 'wall_u', label: 'Wall insulation', tech: 'Wall U-factor (assembly)', fx: 'both'},
+      {k: 'roof_u', label: 'Roof insulation', tech: 'Roof U-factor (assembly)', fx: 'both'}]},
+    {id: 'people', title: 'People & equipment', desc: 'Who and what is inside, giving off heat.', qs: [
+      {k: 'm2_per_person', label: 'How busy the building is', tech: 'Floor area per person', fx: 'both'},
+      {k: 'lpd_w_m2', label: 'Lighting', tech: 'Lighting power density', fx: 'cool'},
+      {k: 'epd_w_m2', label: 'Equipment and plug loads', tech: 'Equipment power density', fx: 'cool'}]},
+    {id: 'air', title: 'Fresh air', desc: 'Outdoor air brought in on purpose, and air leaking through the envelope.', qs: [
+      {k: 'oa_per_person_ls', label: 'Fresh air per person', tech: 'Outdoor air rate per person (ASHRAE 62.1 Rp)', fx: 'both', vent: '6201'},
+      {k: 'oa_per_area_ls_m2', label: 'Fresh air per floor area', tech: 'Outdoor air rate per area (ASHRAE 62.1 Ra)', fx: 'both', vent: '6201'},
+      {k: 'oa_ach', label: 'Fresh air changes per hour', tech: 'Outdoor air by air changes', fx: 'both', vent: 'ach'},
+      {k: 'erv_sensible_eff', label: 'Heat recovery from exhaust air', tech: 'Heat recovery, sensible effectiveness', fx: 'both'},
+      {k: 'erv_latent_eff', label: 'Moisture recovery from exhaust air', tech: 'Heat recovery, latent effectiveness', fx: 'cool'},
+      {k: 'infiltration_ach', label: 'Airtightness', tech: 'Infiltration, whole building (air changes per hour)', fx: 'both'}]},
+    {id: 'schedule', title: 'Schedule & temperatures', desc: 'When the building is used, and how warm or cool it is kept.', qs: [
+      {k: 'occ_start_h', label: 'Opens at (hour of day)', tech: 'Occupied from', fx: 'both', kind: 'number'},
+      {k: 'occ_hours', label: 'Hours in use per day', tech: 'Occupied hours per day', fx: 'both', kind: 'number'},
+      {k: 'occ_days_per_week', label: 'Days in use per week', tech: 'Occupied days per week (annual energy only)', fx: 'none', kind: 'number'},
+      {k: 'hvac_start_before_occ_h', label: 'How early the systems switch on', tech: 'Start-up before occupancy (hours)', fx: 'both'},
+      {k: 't_heat_c', label: 'Winter inside temperature', tech: 'Heating setpoint (occupied)', fx: 'heat'},
+      {k: 't_cool_c', label: 'Summer inside temperature', tech: 'Cooling setpoint (occupied)', fx: 'cool'}]}
+  ];
+  // Fields not asked as questions: labelled number boxes under Advanced settings.
+  var ADVANCED_EXTRA = ['oa_unoccupied_fraction', 'setback_heat_c', 'setup_cool_c'];
+
+  function ventMethod() {
+    return (S.defaults.oa_ach || 0) > 0 && !(S.defaults.oa_per_person_ls > 0) && !(S.defaults.oa_per_area_ls_m2 > 0) ? 'ach' : '6201';
+  }
+  function sectionQs(sec) {
+    var m = ventMethod();
+    return sec.qs.filter(function (q) { return !q.vent || q.vent === m; });
+  }
+  function fieldSpec(k) {
+    var f = null;
+    GROUPS.forEach(function (g) { g.fields.forEach(function (x) { if (x[0] === k) f = x; }); });
+    return f || [k, k, '-', 0.01];
+  }
+  function advancedKeys() {
+    var asked = {};
+    SECTIONS.forEach(function (sec) { sectionQs(sec).forEach(function (q) { asked[q.k] = true; }); });
+    var keys = [];
+    GROUPS.forEach(function (g) { g.fields.forEach(function (f) { if (!asked[f[0]]) keys.push(f[0]); }); });
+    return keys;
+  }
+  function changedCount(keys) {
+    return keys.filter(function (k) { return isChanged(k, fieldSpec(k)[2]); }).length;
+  }
+  function statusText(n) { return n ? n + (n === 1 ? ' change' : ' changes') : 'Typical values'; }
+
+  // A value as shown on a preset button.
+  function presetValue(k, v) {
+    if (v == null) return 'to be confirmed';
+    if (k === 'wwr' || k === 'erv_sensible_eff' || k === 'erv_latent_eff') return fmt(v * 100, 0) + '%';
+    if (k === 'aspect_ratio') return fmt(v, 1) + ' : 1';
+    if (k === 'north_axis_deg') return fmt(v, 0) + '°';
+    if (k === 'hvac_start_before_occ_h') return fmt(v, 0) + ' h';
+    var u = fieldSpec(k)[2], d = UNITS[u] ? toDisp(u, v) : v;
+    return fmt(d, UNITS[u] && isIP() ? UNITS[u].dp : (Math.abs(d) < 10 ? 2 : 1)) + (unitLabel(u) ? ' ' + unitLabel(u) : '');
+  }
+  function presetsFor(k) {
+    var P = window.LOADS_PRESETS || {_all: {}, byType: {}}, list = ((P.byType[S.type] || {})[k] || P._all[k] || []).slice();
+    var def = S.defaults[k], same = function (a, b) { return a != null && b != null && Math.abs(a - b) < 1e-9; };
+    var out = list.map(function (p) { return {label: p.label, value: p.value, typical: same(p.value, def)}; });
+    if (!out.some(function (p) { return p.typical; })) out.splice(Math.min(1, out.length), 0, {label: 'Typical', value: def, typical: true});
+    return out;
+  }
+  function fxChips(fx) {
+    var h = '';
+    if (fx === 'cool' || fx === 'both') h += '<span class="fx cool">' + SNOW + 'Cooling</span>';
+    if (fx === 'heat' || fx === 'both') h += '<span class="fx heat">' + FLAME + 'Heating</span>';
+    if (fx === 'none') h += '<span class="fx none">Annual energy only</span>';
+    return h;
+  }
+  function wwrSketch() {
+    var w = Math.max(0, Math.min(0.95, +S.sc.wwr || 0)), H = 96, band = H * w;
+    var h = '<svg class="facade" viewBox="0 0 240 120" role="img" aria-label="Facade with ' + fmt(w * 100, 0) + '% glass">' +
+      '<rect x="10" y="12" width="220" height="' + H + '" fill="#EEF1F4" stroke="#15202B" stroke-width="1.5"/>';
+    for (var i = 0; i < 6; i++) {
+      h += '<rect x="' + (18 + i * 35.5) + '" y="' + (12 + (H - band) / 2) + '" width="29" height="' + band + '" fill="#9DB9DA" stroke="#15202B" stroke-width="1"/>';
+    }
+    return h + '</svg><span class="facade-cap">' + fmt(w * 100, 0) + '% glass</span>';
+  }
+  function questionHtml(q) {
+    var k = q.k, spec = fieldSpec(k), unit = spec[2], v = S.sc[k];
+    var vb = S.verify[k] ? ' <span class="verify" title="Default not yet checked against its cited source">verify</span>' : '';
+    var h = '<div class="qq" id="q-' + k + '"><div class="qq-head"><div>' +
+      '<div class="qq-label" id="ql-' + k + '">' + esc(q.label) + '</div>' +
+      '<div class="qq-tech">' + esc(q.tech) + (unitLabel(unit) ? ' · ' + esc(unitLabel(unit)) : '') + vb + '</div></div>' +
+      '<div class="fxs">' + fxChips(q.fx) + '</div></div>';
+    if (q.sketch) h += '<div class="sketch" id="wwr-sketch">' + wwrSketch() + '</div>';
+    var showBox = q.kind === 'number';
+    if (q.kind !== 'number') {
+      var ps = presetsFor(k), any = false;
+      h += '<div class="opts" role="group" aria-labelledby="ql-' + k + '">';
+      ps.forEach(function (p) {
+        var on = !S.custom[k] && p.value != null && v != null && Math.abs(v - p.value) < 1e-9;
+        any = any || on;
+        h += '<button type="button" class="opt' + (on ? ' on' : '') + (p.value == null ? ' todo' : '') + '" aria-pressed="' + on + '"' +
+          (p.value == null ? ' disabled title="Preset value not set yet (TODO in data/presets.js)"' : ' data-pk="' + k + '" data-pv="' + p.value + '"') + '>' +
+          '<span class="ol">' + esc(p.label) + '</span>' +
+          '<span class="ov">' + esc(presetValue(k, p.value)) + '</span>' +
+          (p.typical && p.label !== 'Typical' ? '<span class="typ">Typical</span>' : '') +
+          (p.typical ? '<span class="typ-hint">Default for this location</span>' : '') + '</button>';
+      });
+      var custom = !any;
+      h += '<button type="button" class="opt' + (custom ? ' on' : '') + '" aria-pressed="' + custom + '" data-custom="' + k + '">' +
+        '<span class="ol">Custom</span><span class="ov" id="cv-' + k + '">' + (custom ? esc(presetValue(k, v)) : 'Enter a value') + '</span></button></div>';
+      showBox = custom;
+    }
+    if (showBox) h += '<div class="custom">' + fieldHtml(k, q.kind === 'number' ? 'Value' : 'Exact value', unit, spec[3]) + '</div>';
+    else if (S.showSources) h += '<p class="src">' + esc(S.prov[k] || '') + '</p>';
+    return h + '</div>';
+  }
+  function inputsView() {
+    var types = D.archetypes.types, st = stationById(S.station);
+    var h = '<div class="wrap iv" id="iv"><div class="iv-head"><div><h1>Describe your building</h1>' +
+      '<p class="lead">Everything is on this page. Typical values are filled in — change only what you know.</p>' +
+      '<div class="ctx"><span class="ctx-chip">' + icon((TYPE_UI[S.type] || {}).icon, 'ico-xs') + esc(types[S.type].label) + '</span>' +
+      '<span class="ctx-chip">' + esc(st.label) + ' · ' + esc(st.climate_zone_stat) + '</span><a href="#start">Change</a></div></div>' +
+      '<div class="iv-actions"><label class="toggle"><input type="checkbox" id="f-sources"' + (S.showSources ? ' checked' : '') +
+      '> Show where each default comes from</label><button type="button" class="btn" id="b-reset">Reset to typical values</button></div></div>';
+    h += '<div class="iv-cols"><nav class="jump" aria-label="Jump to section"><div class="jump-title">Jump to</div><ol>';
+    SECTIONS.forEach(function (sec, i) {
+      var n = changedCount(sectionQs(sec).map(function (q) { return q.k; }));
+      h += '<li><button type="button" data-jump="sec-' + sec.id + '"><span class="n">' + (i + 1) + '</span><span class="jt">' + esc(sec.title) +
+        '<span class="js' + (n ? ' ch' : '') + '" data-status="' + sec.id + '">' + statusText(n) + '</span></span></button></li>';
+    });
+    var na = changedCount(advancedKeys());
+    h += '<li><button type="button" data-jump="sec-advanced"><span class="n">+</span><span class="jt">Advanced settings<span class="js' + (na ? ' ch' : '') +
+      '" data-status="advanced">' + statusText(na) + '</span></span></button></li></ol>' +
+      '<div class="legend"><span class="fx cool">' + SNOW + 'Affects cooling (summer)</span><span class="fx heat">' + FLAME + 'Affects heating (winter)</span></div></nav>';
+    h += '<div class="sections">';
+    SECTIONS.forEach(function (sec, i) {
+      var qs = sectionQs(sec), n = changedCount(qs.map(function (q) { return q.k; }));
+      h += '<section class="sec card" id="sec-' + sec.id + '" aria-labelledby="st-' + sec.id + '"><div class="sec-head"><span class="n">' + (i + 1) + '</span>' +
+        '<div><h2 id="st-' + sec.id + '">' + esc(sec.title) + '</h2><p>' + esc(sec.desc) + '</p></div>' +
+        '<span class="js' + (n ? ' ch' : '') + '" data-status="' + sec.id + '">' + statusText(n) + '</span></div>';
+      qs.forEach(function (q) { h += questionHtml(q); });
+      h += '</section>';
+    });
+    var adv = advancedKeys();
+    h += '<details class="sec card adv" id="sec-advanced"' + (S.open.advanced ? ' open' : '') + ' data-g="advanced"><summary><span class="n">+</span>' +
+      '<div><h2>Advanced settings</h2><p>Geometry details, supply air, sizing factors, setbacks, energy and carbon factors, plant cost.</p></div>' +
+      '<span class="js' + (na ? ' ch' : '') + '" data-status="advanced">' + statusText(na) + '</span></summary><div class="adv-body">';
+    adv.forEach(function (k) { var f = fieldSpec(k); h += fieldHtml(f[0], f[1], f[2], f[3]); });
+    h += czFieldHtml() + '<h3>Energy and carbon</h3>' + energyHtml() + '<h3>Plant cost</h3>' + plantHtml() + '</div></details>';
+    h += '<div class="iv-next"><a class="btn big" href="#results">Next: See my results →</a></div></div>';
+    h += '<aside class="live" aria-label="Your building so far" id="live">' + liveHtml() + '</aside></div></div>';
+    return h;
+  }
+  // Statuses, the facade sketch and the live panel update in place while the
+  // user types (no rebuild, so focus stays in the box).
+  function refreshInputs() {
+    SECTIONS.forEach(function (sec) {
+      var n = changedCount(sectionQs(sec).map(function (q) { return q.k; }));
+      setStatus(sec.id, n);
+    });
+    setStatus('advanced', changedCount(advancedKeys()));
+    Object.keys(S.custom).forEach(function (k) {
+      var cv = document.getElementById('cv-' + k);
+      if (cv && S.custom[k]) cv.textContent = presetValue(k, S.sc[k]);
+    });
+    var sk = document.getElementById('wwr-sketch');
+    if (sk) sk.innerHTML = wwrSketch();
+    var lv = document.getElementById('live');
+    if (lv) lv.innerHTML = liveHtml();
+  }
+  function setStatus(id, n) {
+    [].forEach.call(document.querySelectorAll('[data-status="' + id + '"]'), function (el) {
+      el.textContent = statusText(n); el.classList.toggle('ch', n > 0);
+    });
+  }
+  // "Your building so far" (step 4 adds deltas and breakdowns).
+  function liveHtml() {
+    var res = resultFor(S.sc, S.ep), g = res.source === 'none' ? null : governed(res, S.sc);
+    var h = '<div class="live-card card"><div class="live-title">Your building so far</div>';
+    if (!g) {
+      return h + '<div class="note warn">' + noResultHtml(res) + '</div><button type="button" class="btn" id="b-run"' +
+        (S.engine && S.engine.available && !S.running ? '' : ' disabled') + '>' + (S.running ? esc(S.engineMsg || 'Running…') : 'Run full simulation · ~4 sec') + '</button></div>';
+    }
+    h += '<span class="badge-src ' + (g.source === 'energyplus' ? 'ep' : 'sur') + '">' + (g.source === 'energyplus' ? 'Full simulation · EnergyPlus' : 'Instant estimate') + '</span>';
+    h += '<div class="live-num cool"><span class="ln-label">' + SNOW + 'Cooling</span><span class="ln-val">' + fmt(capC(g.clg), isIP() ? 1 : 0) + '</span><span class="ln-unit">' + uC() + '</span></div>';
+    h += '<div class="live-num heat"><span class="ln-label">' + FLAME + 'Heating</span><span class="ln-val">' + fmt(capH(g.htg), 0) + '</span><span class="ln-unit">' + uH() + '</span></div>';
+    return h + '<a class="btn" href="#results">See full results</a></div>';
+  }
+
   // ── Actions ─────────────────────────────────────────────────────────────
   function download(name, text, type) {
     var a = document.createElement('a');
@@ -1640,7 +1858,7 @@
       S.station = t.value; S.czOverride = null; S.ep = null; S.baseline = null;
       resetScenario(); renderInputs(); render();
     } else if (t.id === 'f-cz') { S.czOverride = t.value || null; resetScenario(); renderInputs(); render(); }
-    else if (t.id === 'f-sources') { S.showSources = t.checked; renderInputs(); save(); }
+    else if (t.id === 'f-sources') { S.showSources = t.checked; renderInputs(); render(); }
     else if (t.id === 'f-e-heatSource') { S.energy.heatSource = t.value; S.energy.heatEff = ''; renderInputs(); render(); }
     else if (t.id === 'f-plant-cooling' || t.id === 'f-plant-heating') {
       S.plant[t.id === 'f-plant-cooling' ? 'cooling' : 'heating'] = t.value; renderInputs(); render();
@@ -1654,11 +1872,24 @@
     if (sg) { S[sg] = t.getAttribute('data-v'); render(); return; }
     if (t.getAttribute('data-tab')) { S.tab = t.getAttribute('data-tab'); render(); return; }
     if (t.getAttribute('data-type')) { S.type = t.getAttribute('data-type'); S.sc = null; resetScenario(); S.ep = null; S.baseline = null; render(); return; }
+    if (t.getAttribute('data-pk')) {
+      var pk = t.getAttribute('data-pk'), pv = +t.getAttribute('data-pv');
+      S.sc[pk] = (D.fields[pk] || {}).int ? Math.round(pv) : pv; S.custom[pk] = false; S.rebuild = true; render(); return;
+    }
+    if (t.getAttribute('data-custom')) {
+      var ck = t.getAttribute('data-custom'); S.custom[ck] = true; S.rebuild = true; render();
+      var box = document.getElementById('f-' + ck); if (box) box.focus(); return;
+    }
+    if (t.getAttribute('data-jump')) {
+      var sec = document.getElementById(t.getAttribute('data-jump'));
+      if (sec) { if (sec.tagName === 'DETAILS') sec.open = true; sec.scrollIntoView({behavior: 'smooth', block: 'start'}); }
+      return;
+    }
     if (t.getAttribute('data-cat')) { S.typeCat = t.getAttribute('data-cat'); render(); return; }
     if (t.id === 'b-help') { document.getElementById('help').showModal(); return; }
     if (t.id === 'b-help-close') { document.getElementById('help').close(); return; }
     if (t.getAttribute('data-units')) { S.units = t.getAttribute('data-units'); renderStatus(); renderInputs(); render(); return; }
-    if (t.id === 'b-reset') { S.sc = null; S.czOverride = null; resetScenario(); renderInputs(); render(); }
+    if (t.id === 'b-reset') { S.sc = null; S.czOverride = null; S.custom = {}; resetScenario(); renderInputs(); render(); }
     else if (t.id === 'b-run') runEnergyPlus();
     else if (t.id === 'b-annual') runAnnual();
     else if (t.id === 'b-epsens') runEpSweep();
@@ -1693,6 +1924,7 @@
   document.addEventListener('toggle', function (e) {
     var g = e.target.getAttribute && e.target.getAttribute('data-g');
     if (g) S.open[g] = e.target.open;
+    if (e.target.id === 'sec-advanced') S.open.advanced = e.target.open;
     if (e.target.id === 'opt-levers') S.opt.showLevers = e.target.open;
     if (e.target.id === 'tech-view') S.techView = e.target.open;
   }, true);
