@@ -2106,7 +2106,10 @@
 
   // ── Boot ────────────────────────────────────────────────────────────────
   if (!restore()) resetScenario();
-  S.engine = window.EPBrowser && window.EPBrowser.supported()
+  // A host that can't run the in-browser engine (e.g. a preview that blocks
+  // its downloads) sets window.LOADS_ENGINE_OFF to the reason to show.
+  S.engine = window.LOADS_ENGINE_OFF ? {available: false, reason: window.LOADS_ENGINE_OFF}
+    : window.EPBrowser && window.EPBrowser.supported()
     ? {available: true, version: window.EPBrowser.version, where: 'browser'}
     : {available: false, reason: 'EnergyPlus runs in the browser and needs a current Chrome, Edge, Firefox or Safari.'};
   // Views are rebuilt on every route, so listen on the document.
