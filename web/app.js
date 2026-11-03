@@ -1555,6 +1555,7 @@
     var f = D.fields[k] || {};
     var out = list.map(function (p) {
       var v = p.value;
+      if (p.delta != null) v = def != null ? def + p.delta : null;   // Typical plus a step (setpoints, °C)
       if (p.rel != null) {                         // a multiple of Typical, kept inside the input's range
         v = def != null && def !== 0 ? def * p.rel : null;
         if (v != null) {
@@ -1562,7 +1563,11 @@
           v = f.int ? Math.round(v) : +v.toPrecision(6);
         }
       }
-      return {label: p.label, value: v, rel: p.rel, typical: same(v, def)};
+      if (p.delta != null && v != null) {
+        if (f.min !== undefined) v = Math.max(f.min, Math.min(f.max, v));
+        v = +v.toPrecision(6);
+      }
+      return {label: p.label, value: v, rel: p.rel, delta: p.delta, typical: same(v, def)};
     });
     if (!out.some(function (p) { return p.typical; })) out.splice(Math.min(1, out.length), 0, {label: 'Typical', value: def, typical: true});
     return out;
@@ -1622,7 +1627,8 @@
     h += '<button type="button" class="sq' + (!sel ? ' on' : '') + '" aria-pressed="' + !sel + '" data-custom="' + k + '">Custom</button></div>';
     var desc;
     if (sel) desc = '<b>' + esc(sel.typical && sel.label !== 'Typical' ? sel.label : (sel.typical ? 'Typical' : sel.label)) + '</b> · ' + esc(presetValue(k, sel.value)) +
-      (sel.typical ? ' — Default for this location' : sel.rel != null ? ' (typical ' + (sel.rel < 1 ? '−' : '+') + fmt(Math.abs(sel.rel - 1) * 100, 0) + '%)' : '');
+      (sel.typical ? ' — Default for this location' : sel.rel != null ? ' (typical ' + (sel.rel < 1 ? '−' : '+') + fmt(Math.abs(sel.rel - 1) * 100, 0) + '%)' :
+        sel.delta != null ? ' (typical ' + (sel.delta < 0 ? '−' : '+') + (isIP() ? fmt(Math.abs(sel.delta) * 1.8, 1) + ' °F' : fmt(Math.abs(sel.delta), 0) + ' °C') + ')' : '');
     else desc = '<b>Custom</b> · <span id="cv-' + k + '">' + esc(presetValue(k, v)) + '</span>';
     h += '<p class="sq-desc">' + desc + '</p>';
     if (!sel) h += numBox(k, q.label + ' (exact value)');
@@ -1653,7 +1659,7 @@
   function leftPane() {
     var open = S.openSec || 'envelope';
     var h = '<div class="lp"><h1 class="lp-title">Describe your building</h1><p class="lp-sub">Typical values are filled in. Change anything — results on the right update instantly.</p>' +
-      '<p class="todo-note">Most presets sit 20% below or above Typical. A few shown <s>struck through</s> still need a value; use Custom meanwhile.</p><div class="acc">';
+      '<p class="todo-note">Presets are steps from Typical (most are 20% below or above); each says which. Use Custom for an exact value.</p><div class="acc">';
     SECTIONS.concat([COST_SEC]).forEach(function (sec, i) {
       var isOpen = open === sec.id, stt = sectionStatus(sec);
       h += '<section class="acc-sec' + (isOpen ? ' open' : '') + '" id="sec-' + sec.id + '"><h2 class="acc-h"><button type="button" class="acc-btn" aria-expanded="' + isOpen +
