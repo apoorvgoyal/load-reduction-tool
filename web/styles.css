@@ -775,3 +775,7 @@ details.factors .field input, details.factors .field select { font: 600 15px var
 }
 @media (min-width: 901px) { .ws, .ws-body { overflow: clip; } }
 .lp > .todo-note { margin: -4px 0 0; font-size: 13px; color: var(--muted); }
+.cond { display: flex; flex-direction: column; gap: 4px; }
+.cond-l { font-size: 12px; font-weight: 700; color: var(--muted); }
+.seg.mini { align-self: flex-start; padding: 2px; }
+.seg.mini button { min-height: 44px; padding: 0 10px; font-size: 13px; }

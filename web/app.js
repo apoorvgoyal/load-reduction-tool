@@ -255,7 +255,7 @@
       S.coolPct = s.coolPct || '0.4'; S.heatPct = s.heatPct || '99.6';
       S.units = s.units === 'si' ? 'si' : 'ip';
       S.tab = s.tab === 'details' ? 'details' : 'summary'; S.bdMode = s.bdMode === 'pct' ? 'pct' : 'abs';
-      S.showSources = !!s.showSources;
+      S.showSources = false;
       if (s.plant) S.plant = s.plant;
       if (s.rates) S.rates = {cooling: s.rates.cooling || {}, heating: s.rates.heating || {}};
       if (s.energy) Object.keys(S.energy).forEach(function (k) { if (s.energy[k] !== undefined) S.energy[k] = s.energy[k]; });
@@ -292,7 +292,7 @@
   function mbh(w) { return w / 1000 * C.MBH_PER_KW; }
   function seg(name, options, current) {
     return '<div class="seg" data-seg="' + name + '">' + options.map(function (o) {
-      return '<button type="button" data-v="' + esc(o[0]) + '"' + (current === o[0] ? ' class="on"' : '') + '>' + esc(o[1]) + '</button>';
+      return '<button type="button" data-v="' + esc(o[0]) + '" aria-pressed="' + (current === o[0]) + '"' + (current === o[0] ? ' class="on"' : '') + '>' + esc(o[1]) + '</button>';
     }).join('') + '</div>';
   }
 
@@ -1641,7 +1641,6 @@
   function leftPane() {
     var open = S.openSec || 'envelope';
     var h = '<div class="lp"><h1 class="lp-title">Describe your building</h1><p class="lp-sub">Typical values are filled in. Change anything — results on the right update instantly.</p>' +
-      '<label class="toggle"><input type="checkbox" id="f-sources"' + (S.showSources ? ' checked' : '') + '> Show where each default comes from</label>' +
       '<p class="todo-note">Presets shown <s>struck through</s> are still to be confirmed by the MEP lead; use Custom meanwhile.</p><div class="acc">';
     SECTIONS.concat([COST_SEC]).forEach(function (sec, i) {
       var isOpen = open === sec.id, stt = sectionStatus(sec);
@@ -1742,7 +1741,8 @@
         '<div class="ac-right"><div class="ac-rt">Where it comes from</div><p class="sub">Appears with the result.</p></div></article>';
     }
     var w = cool ? g.clg : g.htg, v = cool ? capC(w) : capH(w), dp = cool && isIP() ? 1 : 0, unit = cool ? uC() : uH();
-    h += '<div class="ac-num">' + fmt(v, dp) + '<span>' + unit + '</span></div><p class="ac-when">' + esc(peakPhrase(cool ? g.cKey : g.hKey, cool ? g.time : g.hTime)) + '</p>';
+    h += '<div class="ac-num">' + fmt(v, dp) + '<span>' + unit + '</span></div><p class="ac-when">' + esc(peakPhrase(cool ? g.cKey : g.hKey, cool ? g.time : g.hTime)) + '</p>' +
+      condPicker(kind);
     if (ref) {
       var rv = cool ? capC(ref.clg) : capH(ref.htg), d = v - rv;
       h += Math.abs(d) < Math.pow(10, -dp) / 2 ? '<span class="dchip same">Same as ' + refName + '</span>' :
@@ -1751,6 +1751,13 @@
     var c = plantCost(kind, w);
     h += '<p class="ac-cost">Equipment cost: ' + (c != null ? '<b>$' + fmt(c, 0) + '</b>' : '<span>add a rate on the left</span>') + '</p></div>';
     return h + '<div class="ac-right"><div class="ac-rt">Where it comes from</div>' + whereFrom(kind, g) + '</div></article>';
+  }
+  // Design condition per load: how extreme a design day to size for.
+  function condPicker(kind) {
+    var cool = kind === 'cooling';
+    return '<div class="cond"><span class="cond-l" id="cond-' + kind + '">Design condition</span>' +
+      seg(cool ? 'coolPct' : 'heatPct', cool ? [['0.4', '0.4%'], ['1', '1%'], ['2', '2%']] : [['99.6', '99.6%'], ['99', '99%']], cool ? S.coolPct : S.heatPct)
+        .replace('class="seg"', 'class="seg mini" role="group" aria-labelledby="cond-' + kind + '"') + '</div>';
   }
   function factorsMissing() {
     var E = S.energy, ok = function (v) { return parseFloat(v) > 0; }, m = [];
@@ -1834,8 +1841,7 @@
     h += yearlyCard();
     h += '<details class="card eng" id="eng"' + (S.open.eng ? ' open' : '') + '><summary><h2>For engineers: detailed data</h2>' +
       '<span class="sub">Design conditions, airflow, outdoor-air loads, every design day, profiles, zone sizing, defaults, the two-sided sensitivity chart, yearly end uses and downloads.</span></summary>' +
-      '<div class="conds"><span>Design condition: cooling</span>' + seg('coolPct', [['0.4', '0.4%'], ['1', '1%'], ['2', '2%']], S.coolPct) +
-      '<span>heating</span>' + seg('heatPct', [['99.6', '99.6%'], ['99', '99%']], S.heatPct) + '</div>';
+      '<p class="sub">The design condition is set on each result card above.</p>';
     if (g) {
       h += '<div class="card"><h2>Peak load detail</h2><p class="sub">Selected condition: cooling ' + S.coolPct + '%, heating ' + S.heatPct + '%.</p>' + detailKpis(g, b) + compareTable(g, b) + '</div>';
       h += designDayCard(g, b);
