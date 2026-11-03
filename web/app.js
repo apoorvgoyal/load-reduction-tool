@@ -211,7 +211,7 @@
     epSens: null, epSensRunning: null, epSensError: null,
     opt: {clg: '', htg: '', levers: {}, result: null, showLevers: false},
     energy: {cop: '', heatSource: 'gas', heatEff: '', sfp: '', efElec: '', efGas: ''}, annual: null, annualRunning: false, annualError: null,
-    engine: null, running: false, runError: null, custom: {}, rebuild: false};
+    engine: null, running: false, runError: null, custom: {}, rebuild: false, compare: [], cmpAll: false};
 
   function stationById(id) {
     for (var i = 0; i < D.stations.length; i++) if (D.stations[i].id === id) return D.stations[i];
@@ -243,7 +243,7 @@
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify({type: S.type, station: S.station, czOverride: S.czOverride,
         coolPct: S.coolPct, heatPct: S.heatPct, sc: S.sc, baseline: S.baseline, tab: S.tab, bdMode: S.bdMode, units: S.units,
-        showSources: S.showSources, plant: S.plant, rates: S.rates, energy: S.energy, annual: S.annual}));
+        showSources: S.showSources, plant: S.plant, rates: S.rates, energy: S.energy, annual: S.annual, compare: S.compare}));
     } catch (e) { /* storage unavailable: state just isn't remembered */ }
   }
 
@@ -263,6 +263,7 @@
       var d = C.defaults(D, S.type, s.sc.climate_zone);
       S.prov = d.provenance; S.verify = d.verify; S.defaults = d.scenario;
       S.sc = s.sc; S.baseline = s.baseline || null;
+      S.compare = Array.isArray(s.compare) ? s.compare.slice(0, CMP_MAX) : [];
       return true;
     } catch (e) { return false; }
   }
@@ -735,6 +736,11 @@
       if (res.incompatible) return head + '<p class="sub">The trained model is from an older version of the tool; refit it.</p>' + close;
       var g = governed(res, sc0), out = (heating ? g.hKey : g.cKey) + '|total_w_m2';
       if (!m.outputs[out]) return head + '' + close;
+      // Cooling is sized by whichever cooling day peaks higher, and a change
+      // can move the peak from the humid day to the hot dry day (or back):
+      // take the larger of the two after every move, as the optimizer does.
+      var outs = heating ? [out] : ['clg_db_' + S.coolPct + '|total_w_m2', 'clg_dp_' + S.coolPct + '|total_w_m2'].filter(function (k) { return m.outputs[k]; });
+      var peakOf = function (sc) { var p = C.predict(m, sc).perM2; return Math.max.apply(null, outs.map(function (k) { return p[k]; })); };
       var failed = C.failedTest(m, S.type);
       if (failed) {
         notes += '<div class="note warn">The model for this type and station missed the accuracy limit (' + fmt(failed.worst, 1) +
@@ -744,10 +750,10 @@
         notes += '<div class="note warn">You have changed inputs the model held fixed (' + res.fixedDiffs.map(function (d) { return esc(d.input); }).join(', ') +
           '); the bars are for the trained values of those inputs. Run the exact sweep below for EnergyPlus figures.</div>';
       }
-      var base = C.predict(m, sc0).perM2[out];
+      var base = peakOf(sc0);
       basePeak = base * conv;
       rows = rows.map(function (r) {
-        var at = function (v) { return (C.predict(m, sweepScenario(sc0, def, r.key, v)).perM2[out] - base) * conv; };
+        var at = function (v) { return (peakOf(sweepScenario(sc0, def, r.key, v)) - base) * conv; };
         return {key: r.key, lo: r.lo, hi: r.hi, dl: at(r.lo), dh: at(r.hi)};
       });
       source = '<span class="badge sur">' + (failed ? 'Indicative estimate' : 'Instant estimate') + '</span>';
@@ -1377,7 +1383,7 @@
   function render() { renderStatus(); renderView(); save(); }
 
   // ── Views (hash routing: #start, #inputs, #results) ─────────────────────
-  var VIEWS = ['start', 'workspace'];
+  var VIEWS = ['start', 'workspace', 'compare'];
   function currentView() {
     var v = (location.hash || '').replace('#', '');
     if (v === 'inputs' || v === 'results') {            // old deep links
@@ -1409,6 +1415,9 @@
       } else if (S.rightOnly) refreshRight();
       else refreshInputs();
       S.rebuild = false; S.rightOnly = false;
+      cmpButtons();
+    } else if (v === 'compare') {
+      el.innerHTML = compareView();
     }
     el.setAttribute('data-view', v);
     document.body.setAttribute('data-view', v);
@@ -1715,12 +1724,142 @@
       '<span class="brand-title">Peak Load Tool</span></a><span class="ctx-chip">' + icon((TYPE_UI[S.type] || {}).icon, 'ico-xs') + esc(D.archetypes.types[S.type].label) + ' · ' + esc(st.label) + '</span>' +
       '<a class="chg" href="#start">Change</a><span class="ws-sp"></span><div id="ws-units">' + unitsToggle() + '</div>' +
       '<button type="button" class="btn text" id="b-reset">Reset to typical</button><button type="button" class="btn secondary" id="b-base">Save as baseline</button>' +
+      '<span id="ws-cmp" class="ws-cmp">' + cmpButtonsHtml() + '</span>' +
       '<button type="button" class="btn" id="b-report">Download report</button></header>' +
       '<div class="ws-tabs" role="tablist" aria-label="Workspace"><button type="button" role="tab" data-wstab="inputs" aria-selected="' + (tab === 'inputs') + '">Inputs</button>' +
       '<button type="button" role="tab" data-wstab="results" aria-selected="' + (tab === 'results') + '" id="tab-results">' + esc(tabLabel()) + '</button></div>' +
       '<div class="ws-body"><section class="pane pane-in" id="pane-in" aria-label="Inputs">' + leftPane() + '</section>' +
       '<section class="pane pane-out" id="pane-out" aria-label="Results" aria-live="polite">' + rightPane() + '</section></div></div>';
     return h;
+  }
+  // ── Compare: up to three saved options side by side ─────────────────
+  var CMP_MAX = 3;
+  function cmpSavedIndex() {
+    var h = scenarioHash(S.sc);
+    for (var i = 0; i < S.compare.length; i++) if (S.compare[i].type === S.type && scenarioHash(S.compare[i].sc) === h) return i;
+    return -1;
+  }
+  function cmpButtonsHtml() {
+    var n = S.compare.length, at = cmpSavedIndex(), save;
+    if (at >= 0) save = '<button type="button" class="btn secondary" disabled>✓ Saved as ' + esc(S.compare[at].name) + '</button>';
+    else if (n >= CMP_MAX) save = '<button type="button" class="btn secondary" disabled title="Remove one on the Compare page to save another">' + CMP_MAX + ' saved (most)</button>';
+    else save = '<button type="button" class="btn secondary" id="b-cmp-save">Save to compare</button>';
+    return save + (n ? '<a class="btn' + (n >= 2 ? '' : ' secondary') + '" href="#compare">Compare (' + n + ')</a>' : '');
+  }
+  function cmpButtons() { var el = document.getElementById('ws-cmp'); if (el) el.innerHTML = cmpButtonsHtml(); }
+  function cmpSave() {
+    if (S.compare.length >= CMP_MAX || cmpSavedIndex() >= 0) return;
+    var used = S.compare.map(function (o) { return o.name; });
+    var letter = 'ABC'.split('').filter(function (l) { return used.indexOf('Option ' + l) < 0; })[0] || String(S.compare.length + 1);
+    var ep = null;
+    if (S.ep && S.ep.hash === scenarioHash(S.sc)) { ep = {hash: S.ep.hash, run: JSON.parse(JSON.stringify(S.ep.run))}; delete ep.run.idf; }
+    S.compare.push({name: 'Option ' + letter, type: S.type, station: S.station, czOverride: S.czOverride, sc: JSON.parse(JSON.stringify(S.sc)), ep: ep});
+    save(); cmpButtons();
+  }
+  function cmpOpen(i) {
+    var o = S.compare[i];
+    if (!o) return;
+    S.type = o.type; S.station = o.station; S.czOverride = o.czOverride || null;
+    var d = C.defaults(D, S.type, o.sc.climate_zone);
+    S.prov = d.provenance; S.verify = d.verify; S.defaults = d.scenario;
+    S.sc = JSON.parse(JSON.stringify(o.sc)); S.ep = o.ep; S.custom = {}; S.rebuild = true;
+    location.hash = '#workspace';
+  }
+  function cmpResult(o) {
+    var res = resultFor(o.sc, o.ep);
+    return res.source === 'none' ? null : governed(res, o.sc);
+  }
+  function cmpDelta(kind, g, g0, name0) {
+    if (!g || !g0) return '';
+    var cool = kind === 'cooling', conv = cool ? capC : capH, dp = cool && isIP() ? 1 : 0, unit = cool ? uC() : uH();
+    var d = conv(cool ? g.clg : g.htg) - conv(cool ? g0.clg : g0.htg);
+    if (Math.abs(d) < Math.pow(10, -dp) / 2) return '<span class="dchip same">Same as ' + esc(name0) + '</span>';
+    var c1 = plantCost(kind, cool ? g.clg : g.htg), c0 = plantCost(kind, cool ? g0.clg : g0.htg), dc = c1 != null && c0 != null ? c1 - c0 : null;
+    return '<span class="dchip ' + (d < 0 ? 'down' : 'up') + '">' + (d < 0 ? '▼ ' : '▲ ') + fmt(Math.abs(d), dp) + ' ' + unit +
+      (dc != null && Math.round(dc) !== 0 ? ' · ' + (dc < 0 ? '−' : '+') + '$' + fmt(Math.abs(dc), 0) : '') + ' vs ' + esc(name0) + '</span>';
+  }
+  // One bar per option, all on the same scale, split by where the load comes from.
+  function cmpBars(kind, gs) {
+    var cool = kind === 'cooling', conv = cool ? capC : capH, dp = cool && isIP() ? 1 : 0, unit = cool ? uC() : uH();
+    var max = 0;
+    gs.forEach(function (x) { if (x.g) max = Math.max(max, cool ? x.g.clg : x.g.htg); });
+    var h = '<div class="cmp-chart"><h3>' + (cool ? SNOW + 'Cooling peak' : FLAME + 'Heating peak') + '</h3>';
+    gs.forEach(function (x) {
+      var w = x.g && (cool ? x.g.clg : x.g.htg), bd = x.g && groupedBreakdown(kind, x.g), bar;
+      if (!x.g) bar = '<span class="cmp-none">No result</span>';
+      else if (bd) {
+        var gross = bd.parts.reduce(function (t, p) { return t + p.w; }, 0);
+        bar = '<div class="stack cmp-stack" style="width:' + (w / max * 100) + '%" role="img" aria-label="' + esc(x.o.name) + ': ' +
+          bd.parts.map(function (p) { return p.label + ' ' + fmt(p.w / gross * 100, 0) + '%'; }).join(', ') + '">' +
+          bd.parts.map(function (p) { return '<span style="width:' + (p.w / gross * 100) + '%;background:' + p.shade + '" title="' + esc(p.label) + ' ' + fmt(p.w / gross * 100, 0) + '%"></span>'; }).join('') + '</div>';
+      } else bar = '<div class="stack cmp-stack" style="width:' + (w / max * 100) + '%"><span style="width:100%;background:' + BD_SHADES[kind][1] + '"></span></div>';
+      h += '<div class="cmp-row"><span class="cmp-rl">' + esc(x.o.name) + '</span><div class="cmp-track">' + bar + '</div><span class="cmp-rv num">' +
+        (x.g ? fmt(conv(w), dp) + ' ' + unit : '—') + '</span></div>';
+    });
+    return h + '<ul class="cmp-key">' + BD_GROUPS[kind].map(function (gr, i) { return '<li><i style="background:' + BD_SHADES[kind][i] + '"></i>' + esc(gr[1]) + '</li>'; }).join('') + '</ul></div>';
+  }
+  function cmpInputs(gs) {
+    var opts = gs.map(function (x) { return x.o; }), all = S.cmpAll, rows = '', nDiff = 0;
+    function line(label, vals, sub) {
+      var diff = vals.some(function (v) { return v !== vals[0]; });
+      if (diff) nDiff++;
+      if (!diff && !all) return '';
+      return '<tr' + (diff ? ' class="diff"' : '') + '><th scope="row">' + esc(label) + (sub ? '<span class="rk-hint">' + esc(sub) + '</span>' : '') + '</th>' +
+        vals.map(function (v, i) { return '<td' + (i && v !== vals[0] ? ' class="chg"' : '') + '>' + esc(v) + '</td>'; }).join('') + '</tr>';
+    }
+    function group(title, body) { return body ? '<tr class="grp"><th colspan="' + (opts.length + 1) + '">' + esc(title) + '</th></tr>' + body : ''; }
+    rows += group('Building', line('Building type', opts.map(function (o) { return D.archetypes.types[o.type].label; })) +
+      line('Location', opts.map(function (o) { return stationById(o.station).label; })));
+    var asked = {};
+    SECTIONS.forEach(function (sec) {
+      rows += group(sec.title, sec.qs.map(function (q) {
+        asked[q.k] = true;
+        return line(q.label, opts.map(function (o) { return o.sc[q.k] == null ? '–' : presetValue(q.k, o.sc[q.k]); }), q.tech);
+      }).join(''));
+    });
+    var adv = '';
+    GROUPS.forEach(function (g) { g.fields.forEach(function (f) {
+      if (asked[f[0]]) return;
+      adv += line(f[1], opts.map(function (o) { var v = o.sc[f[0]]; return v == null ? '–' : typeof v === 'boolean' ? (v ? 'Yes' : 'No') : presetValue(f[0], v); }));
+    }); });
+    rows += group('Advanced settings', adv);
+    var h = '<section class="card cmp-inputs"><div class="r-head"><h2>The options</h2><button type="button" class="btn text" id="b-cmp-all">' +
+      (all ? 'Show only differences' : 'Show all inputs') + '</button></div>' +
+      '<p class="sub">' + (opts.length < 2 ? 'Every input of this option.' : nDiff ? nDiff + ' input' + (nDiff === 1 ? '' : 's') + ' differ' + (nDiff === 1 ? 's' : '') +
+        '. Values that differ from ' + esc(opts[0].name) + ' are marked.' : 'All inputs are the same.') + '</p>';
+    if (!rows) return h + '</section>';
+    return h + '<div class="scroll-x"><table class="t cmp-t"><thead><tr><th>Input</th>' + opts.map(function (o) { return '<th>' + esc(o.name) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div></section>';
+  }
+  function compareView() {
+    var gs = S.compare.map(function (o) { return {o: o, g: cmpResult(o)}; });
+    var h = '<div class="cmp"><header class="ws-head"><a class="brand" href="#start" aria-label="Peak Load Tool, start page">' +
+      '<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="6" fill="#15202B"/><path d="M9 22V12l7-4 7 4v10" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="M13 22v-5h6v5" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>' +
+      '<span class="brand-title">Peak Load Tool</span></a><span class="ws-sp"></span><div id="ws-units">' + unitsToggle() + '</div>' +
+      (gs.length ? '<button type="button" class="btn text" id="b-cmp-clear">Clear all</button>' : '') +
+      '<a class="btn" href="#workspace">Back to editing</a></header><div class="wrap cmp-body"><h1 class="cmp-title">Compare options</h1>';
+    if (!gs.length) return h + '<p class="sub">Nothing saved yet. In the workspace, select <b>Save to compare</b> for each option you want to see side by side (up to ' + CMP_MAX + ').</p></div></div>';
+    if (gs.length < 2 || (S.cmpAll && gs.length < 2)) S.cmpAll = gs.length < 2 ? true : S.cmpAll;
+    h += '<p class="sub">' + (gs.length < 2 ? 'Save another option in the workspace to compare it with this one. ' : 'Changes are shown against ' + esc(gs[0].o.name) + '. ') +
+      'Design condition: cooling ' + S.coolPct + '%, heating ' + S.heatPct + '%.</p>';
+    h += '<div class="cmp-cards" style="--n:' + gs.length + '">';
+    gs.forEach(function (x, i) {
+      var g = x.g, ep = g && g.source === 'energyplus';
+      h += '<article class="card cmp-card"><div class="cmp-ch"><input class="cmp-name" id="cmp-name-' + i + '" value="' + esc(x.o.name) + '" maxlength="40" aria-label="Name of this option">' +
+        (g ? '<span class="badge-src ' + (ep ? 'ep' : 'sur') + '">' + (ep ? 'EnergyPlus' : 'Instant estimate') + '</span>' : '') + '</div>' +
+        '<p class="cmp-ctx">' + esc(D.archetypes.types[x.o.type].label) + ' · ' + esc(stationById(x.o.station).label) + '</p>';
+      if (!g) h += '<p class="sub">No instant estimate for this option. Open it and run a full simulation.</p>';
+      else ['cooling', 'heating'].forEach(function (kind) {
+        var cool = kind === 'cooling', w = cool ? g.clg : g.htg, c = plantCost(kind, w);
+        h += '<div class="cmp-peak ' + (cool ? 'cool' : 'heat') + '"><span class="cmp-pl">' + (cool ? SNOW + 'Cooling peak' : FLAME + 'Heating peak') + '</span>' +
+          '<span class="cmp-pn">' + fmt(cool ? capC(w) : capH(w), cool && isIP() ? 1 : 0) + '<em>' + (cool ? uC() : uH()) + '</em></span>' +
+          (c != null ? '<span class="cmp-cost">Equipment $' + fmt(c, 0) + '</span>' : '') + (i ? cmpDelta(kind, g, gs[0].g, gs[0].o.name) : '') + '</div>';
+      });
+      h += '<div class="actions"><button type="button" class="btn secondary" data-cmp-open="' + i + '">Open</button><button type="button" class="btn text" data-cmp-del="' + i + '">Remove</button></div></article>';
+    });
+    h += '</div><section class="card cmp-graph"><h2>Where each peak comes from</h2><p class="sub">Bars share one scale, so their lengths compare directly.</p>' +
+      cmpBars('cooling', gs) + cmpBars('heating', gs) + '</section>';
+    return h + cmpInputs(gs) + '</div></div>';
   }
   // ── Right pane (v3) ───────────────────────────────────────────────────
   // Breakdown groups per load, each with a fixed shade of the load's hue.
@@ -2100,6 +2239,8 @@
 
   function onInput(e) {
     var t = e.target;
+    var cn = t.id && t.id.match(/^cmp-name-(\d)$/);
+    if (cn) { if (S.compare[+cn[1]]) { S.compare[+cn[1]].name = t.value.trim() || 'Option ' + (+cn[1] + 1); save(); } return; }
     var en = t.id && t.id.match(/^f-e-(\w+)$/);
     if (en && en[1] !== 'heatSource') {
       var ev = t.value;
@@ -2213,6 +2354,11 @@
       S.baseline = {sc: JSON.parse(JSON.stringify(S.sc)), ep: S.ep && S.ep.hash === scenarioHash(S.sc) ? S.ep : null};
       render();
     } else if (t.id === 'b-clear') { S.baseline = null; render(); }
+    else if (t.id === 'b-cmp-save') cmpSave();
+    else if (t.getAttribute('data-cmp-open')) cmpOpen(+t.getAttribute('data-cmp-open'));
+    else if (t.getAttribute('data-cmp-del')) { S.compare.splice(+t.getAttribute('data-cmp-del'), 1); render(); }
+    else if (t.id === 'b-cmp-clear') { S.compare = []; render(); }
+    else if (t.id === 'b-cmp-all') { S.cmpAll = !S.cmpAll; render(); }
     else if (t.id === 'b-report') { var rh = reportHtml(); if (rh) download('peak-load-report-' + S.type + '-' + S.station + '.html', rh, 'text/html'); }
     else if (t.id === 'b-dl-idf' && S.ep) download('peak-load-' + S.type + '-' + S.station + '.idf', S.ep.run.idf || '', 'text/plain');
     else if (t.id === 'b-dl-json' && S.ep) {
