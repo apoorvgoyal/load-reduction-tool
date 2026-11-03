@@ -26,7 +26,7 @@
     if (SUR[key] || !SUR_INDEX[key] || SUR_LOADING[key]) return;
     SUR_LOADING[key] = true;
     var s = document.createElement('script');
-    s.src = 'data/surrogates/' + key.replace('|', '__') + '.js';
+    s.src = 'data/surrogates/' + key.replace('|', '__') + '.js' + (window.LOADS_BUILD ? '?v=' + window.LOADS_BUILD : '');
     s.onload = function () { render(); };
     s.onerror = function () { SUR_LOADING[key] = 'error'; render(); };
     document.head.appendChild(s);

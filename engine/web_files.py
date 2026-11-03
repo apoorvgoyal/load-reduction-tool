@@ -82,6 +82,35 @@ def build_site(dest, with_epw=True):
             shutil.copy2(resolve('weather/epw/%s.epw' % stem), os.path.join(eng, 'weather', 'epw', stem + '.epw'))
     with open(os.path.join(eng, 'manifest.json'), 'w') as f:
         json.dump(manifest(), f)
+    stamp_assets(dest, build_id())
+
+
+def build_id():
+    """The deployed commit (GITHUB_SHA in Actions, else git), or a timestamp."""
+    sha = os.environ.get('GITHUB_SHA')
+    if not sha:
+        try:
+            import subprocess
+            sha = subprocess.run(['git', '-C', ROOT, 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+        except OSError:
+            sha = ''
+    if not sha:
+        import time
+        sha = str(int(time.time()))
+    return re.sub(r'[^0-9A-Za-z]', '', sha)[:12]
+
+
+def stamp_assets(dest, bid):
+    """Add ?v=<build> to the page's own scripts and stylesheet, and tell the
+    page the build for the files it loads later, so browsers fetch a new
+    deploy instead of reusing their cached copy (GitHub Pages caches 10 min)."""
+    page = os.path.join(dest, 'index.html')
+    with open(page) as f:
+        html = f.read()
+    html = re.sub(r'((?:src|href)=")((?!https?:)[^"?#]+\.(?:js|css))"', lambda m: m.group(1) + m.group(2) + '?v=' + bid + '"', html)
+    html = html.replace('<script src="data/loads-data.js', '<script>window.LOADS_BUILD = "%s";</script>\n<script src="data/loads-data.js' % bid, 1)
+    with open(page, 'w') as f:
+        f.write(html)
 
 
 def main(argv):
