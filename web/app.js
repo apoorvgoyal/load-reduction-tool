@@ -1552,7 +1552,18 @@
   function presetsFor(k) {
     var P = window.LOADS_PRESETS || {_all: {}, byType: {}}, list = ((P.byType[S.type] || {})[k] || P._all[k] || []).slice();
     var def = S.defaults[k], same = function (a, b) { return a != null && b != null && Math.abs(a - b) < 1e-9; };
-    var out = list.map(function (p) { return {label: p.label, value: p.value, typical: same(p.value, def)}; });
+    var f = D.fields[k] || {};
+    var out = list.map(function (p) {
+      var v = p.value;
+      if (p.rel != null) {                         // a multiple of Typical, kept inside the input's range
+        v = def != null && def !== 0 ? def * p.rel : null;
+        if (v != null) {
+          if (f.min !== undefined) v = Math.max(f.min, Math.min(f.max, v));
+          v = f.int ? Math.round(v) : +v.toPrecision(6);
+        }
+      }
+      return {label: p.label, value: v, rel: p.rel, typical: same(v, def)};
+    });
     if (!out.some(function (p) { return p.typical; })) out.splice(Math.min(1, out.length), 0, {label: 'Typical', value: def, typical: true});
     return out;
   }
@@ -1604,13 +1615,14 @@
     ps.forEach(function (p) {
       var on = p === sel;
       h += '<button type="button" class="sq' + (on ? ' on' : '') + (p.value == null ? ' todo' : '') + '" aria-pressed="' + on + '"' +
-        (p.value == null ? ' disabled title="' + esc(p.label) + ': value to be confirmed (TODO in data/presets.js)"' : ' data-pk="' + k + '" data-pv="' + p.value + '"') + '>' +
+        (p.value == null ? ' disabled title="' + esc(p.label) + ': value to be confirmed (TODO in data/presets.js)"' : ' data-pk="' + k + '" data-pv="' + p.value + '"' +
+          (p.rel != null ? ' title="' + esc(p.label) + ': typical ' + (p.rel < 1 ? '−' : '+') + fmt(Math.abs(p.rel - 1) * 100, 0) + '% (' + esc(presetValue(k, p.value)) + ')"' : '')) + '>' +
         esc(p.typical ? 'Typical' : p.label) + '</button>';
     });
     h += '<button type="button" class="sq' + (!sel ? ' on' : '') + '" aria-pressed="' + !sel + '" data-custom="' + k + '">Custom</button></div>';
     var desc;
     if (sel) desc = '<b>' + esc(sel.typical && sel.label !== 'Typical' ? sel.label : (sel.typical ? 'Typical' : sel.label)) + '</b> · ' + esc(presetValue(k, sel.value)) +
-      (sel.typical ? ' — Default for this location' : '');
+      (sel.typical ? ' — Default for this location' : sel.rel != null ? ' (typical ' + (sel.rel < 1 ? '−' : '+') + fmt(Math.abs(sel.rel - 1) * 100, 0) + '%)' : '');
     else desc = '<b>Custom</b> · <span id="cv-' + k + '">' + esc(presetValue(k, v)) + '</span>';
     h += '<p class="sq-desc">' + desc + '</p>';
     if (!sel) h += numBox(k, q.label + ' (exact value)');
@@ -1641,7 +1653,7 @@
   function leftPane() {
     var open = S.openSec || 'envelope';
     var h = '<div class="lp"><h1 class="lp-title">Describe your building</h1><p class="lp-sub">Typical values are filled in. Change anything — results on the right update instantly.</p>' +
-      '<p class="todo-note">Presets shown <s>struck through</s> are still to be confirmed by the MEP lead; use Custom meanwhile.</p><div class="acc">';
+      '<p class="todo-note">Most presets sit 20% below or above Typical. A few shown <s>struck through</s> still need a value; use Custom meanwhile.</p><div class="acc">';
     SECTIONS.concat([COST_SEC]).forEach(function (sec, i) {
       var isOpen = open === sec.id, stt = sectionStatus(sec);
       h += '<section class="acc-sec' + (isOpen ? ' open' : '') + '" id="sec-' + sec.id + '"><h2 class="acc-h"><button type="button" class="acc-btn" aria-expanded="' + isOpen +
