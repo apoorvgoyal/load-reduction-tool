@@ -1001,9 +1001,9 @@
       if (ap) {
         var epNow = S.ep && S.ep.hash === scenarioHash(S.sc);
         return h + '<div class="gc-c"><span class="pstat ok">✓ Plan applied to your answers</span><p class="sub">' +
-          (S.running ? 'EnergyPlus is checking it now; the results above update when it finishes.' :
-            epNow ? 'Checked in EnergyPlus: the results above are a full simulation of your answers with this plan.' :
-            'The results above include these changes. Select Run full simulation to check them in EnergyPlus.') +
+          (S.running ? 'EnergyPlus is running; the results above update when it finishes.' :
+            epNow ? 'The results above are a full EnergyPlus simulation of your answers with this plan.' :
+            'The results above include these changes. Select Run full simulation at the top to check them in EnergyPlus.') +
           ' To look for a different plan, change a goal and select Update plan.</p></div><div class="gc-d">' + ap.list + '</div></div>' + eng + '</details></section>';
       }
       return h + '<div class="gc-c"><span class="pstat no">Your answers changed since this plan. Select Update plan.</span></div></div>' + eng + '</details></section>';
@@ -1030,9 +1030,8 @@
     o.lastList = list;
     h += '<div class="gc-c"><span class="pstat ' + (okC && okH ? 'ok' : 'no') + '">' + esc(status) + '</span>' +
       (plans.length > 1 ? seg('planPick', plans.map(function (x) { return [x[0], x[1]]; }), pick[0]) : '') +
-      '<div class="actions"><button class="btn" type="button" data-opt-apply="' + esc(pick[1]) + '">Apply plan (' + d.moved.length + ' change' + (d.moved.length === 1 ? '' : 's') + ')</button>' +
-      '<button class="btn secondary" type="button" data-opt-apply-run="' + esc(pick[1]) + '">Check in EnergyPlus · 1 run</button></div>' +
-      '<p class="sub">Check in EnergyPlus applies the plan and runs a full simulation of it.</p></div><div class="gc-d">' + list + '</div></div>';
+      '<div class="actions"><button class="btn" type="button" data-opt-apply="' + esc(pick[1]) + '">Apply plan (' + d.moved.length + ' change' + (d.moved.length === 1 ? '' : 's') + ')</button></div>' +
+      '</div><div class="gc-d">' + list + '</div></div>';
     // For engineers: the best result with 1, 2, 3 … changes.
     var prevPc = null, met = false, byH = !wantC;
     eng += '<h3>How far you can get by changing 1, 2, 3 … things</h3><ol class="opt-count">';
@@ -2121,16 +2120,17 @@
     else if (t.id === 'b-annual') runAnnual();
     else if (t.id === 'b-epsens') runEpSweep();
     else if (t.id === 'b-opt') { t.disabled = true; t.textContent = 'Searching…'; setTimeout(function () { runOptimizer(); render(); }, 20); }
-    else if (t.getAttribute('data-opt-apply') || t.getAttribute('data-opt-apply-run')) {
-      var vals = S.opt.picks[t.getAttribute('data-opt-apply') || t.getAttribute('data-opt-apply-run')];
+    else if (t.getAttribute('data-opt-apply')) {
+      var vals = S.opt.picks[t.getAttribute('data-opt-apply')];
       if (vals) {
         var ch = Object.keys(vals).filter(function (k) { return Math.abs(vals[k] - leverValueNow(k)) > 1e-12; })
           .map(function (k) { return {key: k, v: vals[k]}; });
-        var list = S.opt.lastList;
+        // Record the applied plan before the page redraws, so the card shows
+        // "Plan applied" straight away rather than "out of date".
+        var after = S.sc;
+        ch.forEach(function (c) { after = sweepScenario(after, S.defaults, c.key, c.v); });
+        S.opt.applied = {hash: scenarioHash(after) + '|' + S.coolPct + '|' + S.heatPct, list: S.opt.lastList};
         applyChanges(ch);
-        S.opt.applied = {hash: scenarioHash(S.sc) + '|' + S.coolPct + '|' + S.heatPct, list: list};
-        if (t.getAttribute('data-opt-apply-run') && S.engine && S.engine.available) runEnergyPlus();
-        else render();
       }
     }
     else if (t.id === 'b-base') {
