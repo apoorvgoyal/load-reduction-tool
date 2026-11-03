@@ -1,11 +1,17 @@
 # Publish the tool as a static site on GitHub Pages. EnergyPlus runs in each
 # visitor's browser (web/ep-browser.js), so no server is needed.
-# Manual trigger: Actions tab -> "Deploy to GitHub Pages" -> Run workflow.
-# One-time setup: Settings -> Pages -> Source: GitHub Actions.
+# Runs on every push to main that touches the site, or by hand (Actions tab ->
+# "Deploy to GitHub Pages" -> Run workflow).
+# One-time setup: Settings -> Pages -> Source: GitHub Actions. ("Deploy from a
+# branch" publishes the repository as-is, without the engine files and weather
+# that in-browser EnergyPlus needs.)
 name: Deploy to GitHub Pages
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['web/**', 'engine/**', '.github/workflows/pages.yml']
 
 permissions:
   contents: read

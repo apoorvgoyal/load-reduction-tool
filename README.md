@@ -84,7 +84,7 @@ The page is a static site, so it can be published without a server:
 python3 engine/web_files.py build-site _site     # web/ + engine files + the 27 weather files (~100 MB)
 ```
 
-`.github/workflows/pages.yml` does this and deploys it: in the repository, **Settings → Pages → Source: GitHub Actions**, then **Actions → Deploy to GitHub Pages → Run workflow**. The site appears at `https://<owner>.github.io/<repo>/`. Pages from a private repository needs a paid GitHub plan, and the published site is public unless the repository belongs to a GitHub Enterprise Cloud organisation that restricts Pages access to its members.
+`.github/workflows/pages.yml` does this and deploys it: in the repository, **Settings → Pages → Source: GitHub Actions**, then **Actions → Deploy to GitHub Pages → Run workflow** (after that it redeploys on every push to `main` that changes `web/` or `engine/`). Don't use "Deploy from a branch": it publishes the repository as-is, without the engine files and weather the in-browser runs need, and they fail with *Could not fetch engine/manifest.json (404)*. The site appears at `https://<owner>.github.io/<repo>/`. Pages from a private repository needs a paid GitHub plan, and the published site is public unless the repository belongs to a GitHub Enterprise Cloud organisation that restricts Pages access to its members.
 
 ## Training the surrogate (option B)
 
