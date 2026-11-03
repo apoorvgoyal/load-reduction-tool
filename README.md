@@ -37,6 +37,8 @@ The surrogate is only used when it passed its independent test against fresh Ene
 
 ## What the page shows
 
+**Layout.** Two screens (hash routing): **Start** (`#start`: what the tool does, building type tiles generated from `engine/archetypes.json`, location) and the **Workspace** (`#workspace`): inputs on the left as a six-section accordion of plain-language questions (presets in `web/data/presets.js`: "Typical" is the archetype default; other presets stay `TODO(MEP lead)` until a sourced value is added), results on the right, updating as you type. Suggestions on the right have an **Apply** button that sets the input on the left and highlights it. Below 900 px the two panes become tabs. The sections below describe the result content, which is the same as before the redesign.
+
 - **Units (IP / SI)**, top right. Inputs are stored in SI (the engine's units) and shown and typed in the selected system; results switch between tons/MBH and kW, cfm and L/s, °F and °C, kBtu/ft² and kWh/m². Plant rates are stored per ton and per MBH and shown per kW in SI. Retyping a shown default restores the exact SI default, so rounding never marks an input as changed.
 - **Summary tab**
   - Headline block peaks (cooling tons, heating MBH) for the selected design condition, with change against a saved baseline.
