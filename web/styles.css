@@ -783,3 +783,7 @@ details.factors .field input, details.factors .field select { font: 600 15px var
 .ac-right { justify-content: center; }
 .cond-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 24px; margin: 4px 0 6px; }
 .cond-t { font-weight: 800; align-self: center; }
+.gc-d { grid-column: 1 / -1; }
+.gc-d ul.checklist li { grid-template-columns: 26px minmax(0, 1fr) auto auto; gap: 6px 18px; }
+.gc-c { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.gc-c .sub { flex-basis: 100%; }
