@@ -177,3 +177,32 @@ class BreakdownParityTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+@unittest.skipUnless(NODE, 'node not installed')
+class OptimizerTests(unittest.TestCase):
+    """web/core.js optimize(): options agree with one-lever-at-a-time sensitivity."""
+    def _run(self, target):
+        # Linear toy model: 'a' strong, 'b' weak and sitting near the bottom of its range
+        # (like infiltration 0.15 ACH in 0.05-0.6), 'c' only raises the peak.
+        script = """var C=require(%r);
+var L=[{key:'a',v0:0.4,lo:0.1,hi:0.8},{key:'b',v0:0.15,lo:0.05,hi:0.6},{key:'c',v0:1,lo:0.5,hi:2}];
+function ev(v){return {clg:100-50*(0.4-v.a)-20*(0.15-v.b)+5*Math.abs(v.c-1),htg:50};}
+var r=C.optimize(L,ev,{clg:%r,htg:null});
+function d(p){return p?r.describe(p).moved.map(function(m){return [m.key,m.to,m.saves.clg];}):null;}
+console.log(JSON.stringify({f:d(r.fewest),s:d(r.smallest),one:r.byCount[0].best.clg}));""" % (
+            os.path.join(TOOL, 'web', 'core.js'), target)
+        return json.loads(subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True).stdout)
+
+    def test_options_use_the_strong_lever_and_no_token_moves(self):
+        out = self._run(0.1)
+        for opt in (out['f'], out['s']):
+            self.assertEqual([m[0] for m in opt], ['a'])            # 'a' alone reaches 10%; no token 'b' move
+            self.assertAlmostEqual(opt[0][1], 0.2, places=2)
+        self.assertAlmostEqual(out['one'], 90.0, places=1)           # 1-change row pulled back to just meet the target
+
+    def test_moves_listed_biggest_first(self):
+        out = self._run(0.165)                                       # needs 'a' at its floor plus some 'b'
+        saves = [m[2] for m in out['s']]
+        self.assertEqual(saves, sorted(saves, reverse=True))
+        self.assertEqual(out['s'][0][0], 'a')

@@ -139,6 +139,15 @@
     infiltration: 'Infiltration', internal_mass: 'Internal mass (slabs, partitions)',
     ventilation: 'Ventilation (outdoor air)', heat_recovery: 'Heat recovery'
   };
+  // Pie slices for the breakdown; each has a fixed colour (--s-<key> in styles.css).
+  var SLICE_OF = {people: 'people', lighting: 'lighting', equipment: 'equipment', window_solar: 'window_solar',
+    window_conduction: 'window_conduction', walls: 'envelope', roof: 'envelope', ground_floor: 'envelope',
+    infiltration: 'infiltration', internal_mass: 'other', ventilation: 'ventilation', heat_recovery: 'heat_recovery'};
+  var SLICE_ORDER = ['ventilation', 'window_solar', 'window_conduction', 'envelope', 'infiltration', 'people', 'lighting',
+    'equipment', 'other', 'heat_recovery'];
+  var SLICE_LABEL = {ventilation: 'Ventilation (outdoor air)', window_solar: 'Windows, sun', window_conduction: 'Windows, heat through glass',
+    envelope: 'Walls, roof and floor', infiltration: 'Air leakage', people: 'People', lighting: 'Lighting', equipment: 'Equipment',
+    other: 'Heat stored in the structure', heat_recovery: 'Heat recovery'};
 
   // ── State ───────────────────────────────────────────────────────────────
   var S = {type: 'office', station: 'chicago', czOverride: null, coolPct: '0.4', heatPct: '99.6',
@@ -559,30 +568,59 @@
       base = {};
       breakdownRows(b.result.groups[kind], cooling ? b.cBlock : b.hBlock, cooling ? b.cf : b.hf).forEach(function (r) { base[r.key] = r; });
     }
-    var pct = S.bdMode === 'pct';
-    var mx = Math.max.apply(null, rows.map(function (r) { return Math.abs(pct ? r.pct : r.w); }).concat([1e-9]));
-    var hasNeg = rows.some(function (r) { return r.w < 0; }), zero = hasNeg ? 30 : 0;
-    rows.forEach(function (r) {
-      // Positive bars run right from the zero line; credits run left into the space before it.
-      var v = pct ? r.pct : r.w, w = Math.abs(v) / mx * (100 - zero);
-      var shown = pct ? fmt(r.pct, 1) + '%' : fmt(conv(r.w), dp) + ' ' + unit;
-      var bv = base && base[r.key], d = bv ? (pct ? r.pct - bv.pct : conv(r.w) - conv(bv.w)) : null;
-      h += '<div class="bd-row"><div class="bd-name">' + esc(COMP_LABEL[r.key]) + '</div>' +
-        '<div class="bd-bar"><div class="fill ' + kind + (v < 0 ? ' neg' : '') + '" style="left:' + (v < 0 ? zero - w * zero / (100 - zero) : zero) +
-        '%;width:' + (v < 0 ? w * zero / (100 - zero) : w) + '%"></div>' + (hasNeg ? '<div class="zero" style="left:' + zero + '%"></div>' : '') + '</div>' +
-        '<div class="bd-val num">' + shown + (d != null && Math.abs(d) > 0.05 ? ' <span class="' + (d < 0 ? 'good' : 'bad') + '">' +
-          (d > 0 ? '+' : '−') + fmt(Math.abs(d), pct ? 1 : dp) + (pct ? ' pt' : '') + '</span>' : '') + '</div></div>';
+    // Pie slices: fixed colour per source (never by rank); walls, roof and
+    // floor share one slice. Negative sources (credits) sit under the pie.
+    function slices(rs) {
+      var acc = {};
+      rs.forEach(function (r) { var k = SLICE_OF[r.key] || 'other'; acc[k] = (acc[k] || 0) + r.w; });
+      return acc;
+    }
+    var cur = slices(rows), prev = base ? slices(Object.keys(base).map(function (k) { return base[k]; })) : null;
+    var pos = SLICE_ORDER.filter(function (k) { return cur[k] > 0; });
+    var neg = SLICE_ORDER.filter(function (k) { return cur[k] < 0; });
+    var gross = pos.reduce(function (t, k) { return t + cur[k]; }, 0), total = block.total_w * factor;
+    var svg = '<svg class="pie" viewBox="0 0 120 120" role="img" aria-label="' + (cooling ? 'Cooling' : 'Heating') + ' peak by source">';
+    var ang = -Math.PI / 2;
+    pos.forEach(function (k) {
+      var frac = cur[k] / gross, a1 = ang + frac * 2 * Math.PI, R = 56, r0 = 32;
+      if (frac > 0.9999) {
+        svg += '<circle cx="60" cy="60" r="44" fill="none" stroke="var(--s-' + k + ')" stroke-width="24"><title>' + esc(SLICE_LABEL[k]) + ' 100%</title></circle>';
+      } else {
+        var lg = frac > 0.5 ? 1 : 0, c = Math.cos, sn = Math.sin;
+        svg += '<path d="M' + (60 + R * c(ang)) + ' ' + (60 + R * sn(ang)) + ' A' + R + ' ' + R + ' 0 ' + lg + ' 1 ' + (60 + R * c(a1)) + ' ' + (60 + R * sn(a1)) +
+          ' L' + (60 + r0 * c(a1)) + ' ' + (60 + r0 * sn(a1)) + ' A' + r0 + ' ' + r0 + ' 0 ' + lg + ' 0 ' + (60 + r0 * c(ang)) + ' ' + (60 + r0 * sn(ang)) +
+          'Z" fill="var(--s-' + k + ')" stroke="var(--surface)" stroke-width="1.5"><title>' + esc(SLICE_LABEL[k]) + ': ' + fmt(conv(cur[k]), dp) + ' ' + unit +
+          ' (' + fmt(frac * 100, 0) + '%)</title></path>';
+      }
+      ang = a1;
     });
-    var total = block.total_w * factor;
-    h += '<div class="bd-total"><span>Total</span><span class="num">' + (pct ? '100%' : fmt(conv(total), dp) + ' ' + unit) + '</span></div></div>';
+    svg += '<text x="60" y="58" text-anchor="middle" class="pie-total">' + fmt(conv(total), dp) + '</text>' +
+      '<text x="60" y="71" text-anchor="middle" class="pie-unit">' + unit + ' peak</text></svg>';
+    function delta(k) {
+      if (!prev) return '';
+      var d = conv(cur[k] || 0) - conv(prev[k] || 0);
+      return Math.abs(d) > 0.05 ? ' <span class="' + (d < 0 ? 'good' : 'bad') + '">' + (d > 0 ? '+' : '−') + fmt(Math.abs(d), dp) + '</span>' : '';
+    }
+    h += '<div class="pie-wrap">' + svg + '<ul class="pie-key">';
+    pos.forEach(function (k) {
+      h += '<li><i style="background:var(--s-' + k + ')"></i><span class="pk-name">' + esc(SLICE_LABEL[k]) + '</span>' +
+        '<span class="num pk-pct">' + fmt(cur[k] / gross * 100, 0) + '%</span><span class="num pk-val">' + fmt(conv(cur[k]), dp) + delta(k) + '</span></li>';
+    });
+    h += '</ul></div>';
+    if (neg.length) {
+      h += '<div class="pie-credits"><b>Reduces the peak</b> (not in the pie): ' + neg.map(function (k) {
+        return esc(SLICE_LABEL[k]) + ' <span class="num">−' + fmt(Math.abs(conv(cur[k])), dp) + ' ' + unit + '</span>' + delta(k);
+      }).join(' · ') + '</div>';
+    }
+    h += '<div class="bd-total"><span>' + (neg.length ? 'Sources ' + fmt(conv(gross), dp) + ' − credits ' + fmt(conv(gross - total), dp) + ' = peak' : 'Peak') +
+      '</span><span class="num">' + fmt(conv(total), dp) + ' ' + unit + '</span></div></div>';
     return h;
   }
 
   function breakdownCard(g, b) {
     var h = '<div class="card"><div class="card-head"><div><h2>Where the peak load comes from</h2>' +
-      '<p class="sub">Each peak split by source, at the hour the whole building peaks. Negative bars are credits (heat stored in slabs, ' +
-      'heat recovered).' + (b ? ' Coloured figures are the change from the baseline.' : '') + '</p></div>' +
-      seg('bdMode', [['abs', 'Absolute'], ['pct', '% of peak']], S.bdMode) + '</div>';
+      '<p class="sub">Each peak split by source, at the hour the whole building peaks. Slices show each source\'s share; ' +
+      'figures are in tons (cooling) and MBH (heating).' + (b ? ' Coloured figures are the change from the baseline.' : '') + '</p></div></div>';
     h += '<div class="bd-pair">' + breakdownPanel('cooling', g, b) + breakdownPanel('heating', g, b) + '</div>';
     h += '<p class="sub" style="margin:10px 0 0">Method: the zone part of each peak is split in the proportions of EnergyPlus\'s Zone ' +
       'Component Load Summary; ventilation and heat recovery come from the system at the peak hour. Heating counts sensible loads only.</p></div>';
@@ -641,9 +679,10 @@
     var unit = heating ? 'MBH' : 'tons', dp = heating ? 0 : 1;
     var conv = heating ? sc0.gfa_m2 / 1000 * C.MBH_PER_KW * sc0.heating_sizing_factor
       : sc0.gfa_m2 / 1000 / C.KW_PER_TON * sc0.cooling_sizing_factor;
-    var rows = sweepRanges(sc0, def), notes = '', source;
+    var rows = sweepRanges(sc0, def), notes = '', source, basePeak = null;
     if (ep) {
       var b0 = govFromTotals(ep.base, heating);
+      basePeak = b0 / sc0.gfa_m2 * conv;
       rows = rows.filter(function (r) { return ep.runs[r.key]; }).map(function (r) {
         var x = ep.runs[r.key];
         return {key: r.key, lo: r.lo, hi: r.hi, dl: (govFromTotals(x.lo, heating) - b0) / sc0.gfa_m2 * conv,
@@ -665,6 +704,7 @@
           '); the bars are for the trained values of those inputs. Run the exact sweep below for EnergyPlus figures.</div>';
       }
       var base = C.predict(m, sc0).perM2[out];
+      basePeak = base * conv;
       rows = rows.map(function (r) {
         var at = function (v) { return (C.predict(m, sweepScenario(sc0, def, r.key, v)).perM2[out] - base) * conv; };
         return {key: r.key, lo: r.lo, hi: r.hi, dl: at(r.lo), dh: at(r.hi)};
@@ -690,11 +730,31 @@
     rows = rows.filter(function (r) { return r.span >= small; }).sort(function (a, b) { return b.span - a.span; }).slice(0, 10);
     var mx = Math.max.apply(null, rows.map(function (r) { return Math.max(Math.abs(r.dl), Math.abs(r.dh)); })) || 1;
     var load = heating ? 'heating' : 'cooling';
-    var h = head + '<p class="sub">' + source + ' Each row tries one input at the low and high end of its realistic range, everything ' +
-      'else as you have set it. Longest bars = biggest levers. <span class="good">Green</span>: peak ' + load + ' goes down; ' +
-      '<span class="bad">red</span>: it goes up.' +
-      (heating ? ' The heating design day has no sun and no people, lighting or equipment, so those inputs do not appear.' : '') +
-      '</p>' + notes + '<div class="tz">';
+    // Plain view: for each input, the end of its range that lowers the peak,
+    // phrased as an action, ranked by how much it saves.
+    var opps = [];
+    rows.forEach(function (r) {
+      var best = r.dl <= r.dh ? {v: r.lo, d: r.dl} : {v: r.hi, d: r.dh};
+      if (best.d < -(heating ? 0.5 : 0.05)) opps.push({key: r.key, v: best.v, d: best.d});
+    });
+    opps.sort(function (a, b) { return a.d - b.d; });
+    opps = opps.slice(0, 8);
+    var omx = opps.length ? -opps[0].d : 1;
+    var h = head + '<p class="sub">' + source + ' The changes that would lower the peak ' + load + ' load most, each tried on its own ' +
+      'with everything else as you have set it. Combine several with <b>Reach a target</b> below.</p>' + notes;
+    if (!opps.length) h += '<p class="sub">None of the design inputs lowers this peak within its realistic range.</p>';
+    h += '<ol class="opps">';
+    opps.forEach(function (o) {
+      var pc = basePeak ? -o.d / basePeak * 100 : null;
+      h += '<li><div class="opp-text">' + plainAction(o.key, o.v, heating) + '</div>' +
+        '<div class="opp-bar"><div class="fill ' + load + '" style="width:' + (-o.d / omx * 100) + '%"></div></div>' +
+        '<div class="opp-val num">−' + fmt(-o.d, dp) + ' ' + unit + (pc != null ? ' <span>(−' + fmt(pc, 0) + '%)</span>' : '') + '</div></li>';
+    });
+    h += '</ol>' + (heating ? '<p class="sub">The heating design day has no sun and no people, lighting or equipment, so those inputs ' +
+      'cannot lower the heating peak.</p>' : '');
+    // Technical view: both ends of every range, as before.
+    h += '<details class="tech"' + (S.techView ? ' open' : '') + ' id="tech-view"><summary>Technical view: both ends of each input\'s range</summary>' +
+      '<p class="sub"><span class="good">Green</span>: peak goes down; <span class="bad">red</span>: it goes up.</p><div class="tz">';
     rows.forEach(function (r) {
       function bar(d) {
         var w = Math.abs(d) / mx * 50, left = d < 0 ? 50 - w : 50;
@@ -711,7 +771,34 @@
         '<div class="bar-wrap"><div class="axis"></div>' + bar(r.dl) + bar(r.dh) + '</div>' +
         '<div class="tz-meta">' + effect(r.lo, r.dl) + ' &nbsp;·&nbsp; ' + effect(r.hi, r.dh) + '</div></div>';
     });
-    return h + '</div>' + (ep ? '' : sweepBtn) + '</div>';
+    return h + '</div></details>' + (ep ? '' : sweepBtn) + '</div>';
+  }
+
+  // One sweep result as something a design team can act on.
+  function plainAction(key, v, heating) {
+    var now = leverValueNow(key), up = v > now, sv = sweepValue(key, v);
+    var A = {
+      wwr: up ? 'Increase window area to ' + sv + ' of the wall' : 'Reduce window area to ' + sv + ' of the wall',
+      shgc: up ? 'Use higher solar-gain glass (SHGC ' + sv + ')' : 'Use lower solar-gain glass (SHGC ' + sv + ')',
+      win_u: up ? 'Use less insulating windows (' + sv + ')' : 'Use better-insulated windows (' + sv + ')',
+      wall_u: up ? 'Use less wall insulation (' + sv + ')' : 'Insulate walls better (' + sv + ')',
+      roof_u: up ? 'Use less roof insulation (' + sv + ')' : 'Insulate the roof better (' + sv + ')',
+      overhang_pf: up ? 'Add window shading overhangs (projection factor ' + sv + ')' : 'Remove shading overhangs',
+      lpd_w_m2: up ? 'Raise lighting power to ' + sv : 'Lower lighting power to ' + sv,
+      epd_w_m2: up ? 'Raise equipment power to ' + sv : 'Lower equipment power to ' + sv + ' <span class="tag">depends on use</span>',
+      m2_per_person: up ? 'Fewer people: ' + sv + ' <span class="tag">depends on use</span>' : 'More people: ' + sv,
+      oa_multiplier: up ? 'Increase outdoor air to ' + sv : 'Reduce outdoor air to ' + sv + (v < 1 ? ' <span class="tag">below code rate</span>' : ''),
+      oa_ach: up ? 'Increase outdoor air to ' + sv : 'Reduce outdoor air to ' + sv + (v < S.defaults.oa_ach ? ' <span class="tag">below the type default</span>' : ''),
+      erv_sensible_eff: up ? 'Add heat recovery (sensible, ' + sv + ' effective)' : 'Less heat recovery (' + sv + ')',
+      erv_latent_eff: up ? 'Add heat and moisture recovery (latent, ' + sv + ' effective)' : 'Less moisture recovery (' + sv + ')',
+      infiltration_ach: up ? 'Leakier envelope (' + sv + ')' : 'Tighter, less leaky envelope (' + sv + ')',
+      t_cool_c: up ? 'Raise the cooling setpoint to ' + sv : 'Lower the cooling setpoint to ' + sv,
+      t_heat_c: up ? 'Raise the heating setpoint to ' + sv : 'Lower the heating setpoint to ' + sv,
+      n_floors: 'Stack the same floor area on ' + sv,
+      aspect_ratio: (up ? 'Make the plan longer and narrower' : 'Make the plan more compact') + ' (' + fmt(v, 1) + ' : 1)',
+      north_axis_deg: 'Rotate the building to ' + sv
+    };
+    return A[key] || esc(SWEEP_LABELS[key]) + ' → ' + sv;
   }
 
   // Exact sensitivity: the base scenario plus each input at its low and high
@@ -846,8 +933,11 @@
     function option(title, pt, note) {
       if (!pt) return '<div class="opt-col"><h3>' + esc(title) + '</h3><p class="sub">' + esc(note || 'No option found.') + '</p></div>';
       var d = r.describe(pt), x = '<div class="opt-col"><h3>' + esc(title) + '</h3><ul class="opt-moves">';
+      var byH = isNaN(parseFloat(o.clg));
       d.moved.forEach(function (mv) {
-        x += '<li><b>' + esc(SWEEP_LABELS[mv.key]) + '</b> ' + sweepValue(mv.key, mv.from) + ' → ' + sweepValue(mv.key, mv.to) + '</li>';
+        var sv = byH ? mbh(mv.saves.htg) : tons(mv.saves.clg);
+        x += '<li><b>' + esc(SWEEP_LABELS[mv.key]) + '</b> ' + sweepValue(mv.key, mv.from) + ' → ' + sweepValue(mv.key, mv.to) +
+          ' <span class="opp-save">' + (sv >= 0 ? '−' : '+') + fmt(Math.abs(sv), byH ? 0 : 1) + (byH ? ' MBH' : ' tons') + '</span></li>';
       });
       x += '</ul><div class="opt-res">Cooling ' + fmt(tons(d.result.clg), 1) + ' tons <b class="' + (pct(d.result.clg, b.clg) < 0 ? 'good' : 'bad') + '">' +
         fmt(pct(d.result.clg, b.clg), 1) + '%</b> · Heating ' + fmt(mbh(d.result.htg), 0) + ' MBH <b class="' + (pct(d.result.htg, b.htg) <= 0 ? 'good' : 'bad') + '">' +
@@ -870,11 +960,26 @@
       h += '<div class="note warn">These levers can\'t reach the target within their ranges. The most they achieve together is shown below; ' +
         'allow more levers, widen a range, or lower the target.</div><div class="opt-cols">' + option('Best achievable', r.bestAchievable) + '</div>';
     }
-    h += '<h3>Best reduction with 1, 2, 3 … levers</h3><div class="opt-count">' + r.byCount.map(function (c) {
-      var pc = -pct(c.best.clg, b.clg);
-      return '<div class="opt-count-row"><span>' + c.levers + '</span><div class="bd-bar"><div class="fill cooling" style="left:0;width:' +
-        Math.max(0, Math.min(100, pc)) + '%"></div></div><span class="num">−' + fmt(pc, 1) + '% cooling</span></div>';
-    }).join('') + '</div><p class="sub" style="margin-top:6px">Estimates from the trained model; confirm the option you choose with EnergyPlus.</p></div>';
+    // The most each number of changes can do, naming the changes.
+    var prevPc = null, met = false;
+    h += '<h3>How far you can get by changing 1, 2, 3 … things</h3><p class="sub">For each number of changes, the best ' +
+      'combination among the allowed levers' + (r.feasible ? ', pulled back to just meet your target once it can' : '') + '.</p><ol class="opt-count">';
+    r.byCount.forEach(function (c) {
+      var d = r.describe(c.pt), pcC = -pct(d.result.clg, b.clg), pcH = -pct(d.result.htg, b.htg);
+      var byH = isNaN(parseFloat(o.clg)), pc = byH ? pcH : pcC;
+      if (met) return;                                   // once the target is met, more changes add nothing
+      if (prevPc != null && pc < prevPc + 0.5 && c.pt.s > 0) return;
+      met = c.pt.s <= 0;
+      prevPc = pc;
+      h += '<li><div class="oc-n">' + c.levers + ' change' + (c.levers > 1 ? 's' : '') + '</div><div class="oc-what">' +
+        d.moved.map(function (mv) { return esc(SWEEP_LABELS[mv.key]) + ' ' + sweepValue(mv.key, mv.from) + ' → ' + sweepValue(mv.key, mv.to); }).join('; ') +
+        '</div><div class="oc-res num">' + (byH ? 'Heating −' + fmt(pcH, 1) + '%' : 'Cooling −' + fmt(pcC, 1) + '%') +
+        (c.pt.s <= 0 ? ' <span class="good">meets target</span>' : '') + '</div></li>';
+    });
+    h += '</ol><p class="sub" style="margin-top:6px">Rows that add a change without lowering the peak further are left out. Changes in each option are listed ' +
+      'biggest first; the figure beside each is how much the peak would rise if that change alone were dropped. "Smallest overall change" counts each move ' +
+      'as the share it uses of that input\'s room, from its current value to the end of its range. Estimates from the trained model; confirm the option ' +
+      'you choose with EnergyPlus.</p></div>';
     return h;
   }
 
@@ -1376,7 +1481,10 @@
   }
   resultsEl.addEventListener('input', onOptInput);
   resultsEl.addEventListener('change', onOptInput);
-  resultsEl.addEventListener('toggle', function (e) { if (e.target.id === 'opt-levers') S.opt.showLevers = e.target.open; }, true);
+  resultsEl.addEventListener('toggle', function (e) {
+    if (e.target.id === 'opt-levers') S.opt.showLevers = e.target.open;
+    if (e.target.id === 'tech-view') S.techView = e.target.open;
+  }, true);
   fetch('api/engine').then(function (r) { return r.json(); })
     .then(function (st) { S.engine = st; render(); })
     .catch(function () { S.engine = {available: false, reason: 'No EnergyPlus service (page opened without python server.py).'}; render(); });

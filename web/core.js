@@ -211,8 +211,15 @@
       if (goalH != null) s = Math.max(s, (r.htg - goalH) / b.htg);
       return {vals: vals, r: r, s: s};
     }
-    function change(vals) {     // normalised L1 distance from the baseline
-      var d = 0; levers.forEach(function (l) { d += Math.abs(vals[l.key] - l.v0) / ((l.hi - l.lo) || 1); }); return d;
+    // How much of a lever's room is used: the move as a fraction of the
+    // distance from its current value to the end of its range in that
+    // direction (0.15 -> 0.05 ACH with a 0.05 floor is all of it, 1.0).
+    function used(l, v) {
+      var room = v < l.v0 ? l.v0 - l.lo : l.hi - l.v0;
+      return room > 0 ? Math.abs(v - l.v0) / room : 0;
+    }
+    function change(vals) {
+      var d = 0; levers.forEach(function (l) { d += used(l, vals[l.key]); }); return d;
     }
     function cost(vals) {
       var c = 0; levers.forEach(function (l) { if (l.cost) c += l.cost * Math.abs(vals[l.key] - l.v0); }); return c;
@@ -239,6 +246,39 @@
         });
       }
       return score(vals);
+    }
+    // Drop token moves (under 5% of a lever's room) when the target can be
+    // met without them, re-tightening the remaining levers.
+    function tidy(pt) {
+      if (!pt) return pt;
+      var cur = pt, again = true;
+      while (again) {
+        again = false;
+        var small = moved(cur.vals).filter(function (l) { return used(l, cur.vals[l.key]) < 0.05; })
+          .sort(function (a, c) { return used(a, cur.vals[a.key]) - used(c, cur.vals[c.key]); });
+        for (var i = 0; i < small.length && !again; i++) {
+          var l = small[i], best = null;
+          // Put it back and make up the shortfall with one of the other moved levers.
+          moved(cur.vals).forEach(function (l2) {
+            if (l2.key === l.key) return;
+            var t = copy(cur.vals); t[l.key] = l.v0;
+            if (score(t).s > 0) {
+              var near = t[l2.key], far = t[l2.key] < l2.v0 ? l2.lo : l2.hi;
+              t[l2.key] = far;
+              if (score(t).s > 0) return;
+              for (var it = 0; it < 20; it++) {
+                var mid = snap(l2, (far + near) / 2); t[l2.key] = mid;
+                if (score(t).s <= 0) far = mid; else near = mid;
+              }
+              t[l2.key] = far;
+            }
+            var c = score(t);
+            if (c.s <= 0 && (!best || change(c.vals) < change(best.vals))) best = c;
+          });
+          if (best && change(best.vals) <= change(cur.vals) + 0.1) { cur = best; again = true; }
+        }
+      }
+      return cur;
     }
     // Improve the shortfall by coordinate moves (used when the target is out of reach).
     function climb(pt, keys) {
@@ -272,7 +312,7 @@
             if (t[l.key] === cur.vals[l.key]) return;
             var c = score(t), gain = cur.s - c.s;
             if (gain <= 1e-12) return;
-            var spend = metric === 'cost' ? (l.cost || 0) * Math.abs(t[l.key] - cur.vals[l.key]) : h;
+            var spend = metric === 'cost' ? (l.cost || 0) * Math.abs(t[l.key] - cur.vals[l.key]) : used(l, t[l.key]) - used(l, cur.vals[l.key]);
             var eff = spend > 0 ? gain / spend : Infinity;
             if (!pick || eff > pick.eff) pick = {eff: eff, pt: c};
           });
@@ -326,7 +366,7 @@
         if (!bestK || p.s < bestK.s) bestK = p;
         if (p.s <= 0) feasK.push(p);
       });
-      out.byCount.push({levers: k, best: bestK.r});
+      out.byCount.push({levers: k, best: bestK.r, pt: bestK.s <= 0 ? shrink(bestK) : bestK});
       if (!fewest && feasK.length) {
         fewest = combos(top, k).map(function (keys) { return greedy(keys, 'change'); })
           .filter(function (p) { return p.s <= 0; }).concat(feasK).map(function (p) { return shrink(p); })
@@ -340,8 +380,9 @@
       var smallest = feas.sort(function (a, c) { return change(a.vals) - change(c.vals); }).slice(0, 8)
         .concat(g.s <= 0 ? [g] : [])
         .map(function (p) { return shrink(p); }).sort(function (a, c) { return change(a.vals) - change(c.vals); })[0];
-      out.smallest = smallest;
+      out.smallest = tidy(smallest);
       out.fewest = fewest;
+      out.byCount.forEach(function (c) { if (fewest && c.pt.s <= 0 && moved(c.pt.vals).length >= moved(fewest.vals).length) { c.pt = fewest; c.best = fewest.r; } });
       if (levers.some(function (l) { return l.cost; })) {
         // Spend on the cheapest levers first: pull the dearest back first.
         var order = levers.slice().sort(function (a, c) { return (c.cost || 0) - (a.cost || 0); });
@@ -349,13 +390,21 @@
         out.cheapest = feas.sort(function (a, c) { return cost(a.vals) - cost(c.vals); }).slice(0, 8)
           .concat(gc.s <= 0 ? [gc] : [])
           .map(function (p) { return shrink(p, order); }).sort(function (a, c) { return cost(a.vals) - cost(c.vals); })[0];
+        out.cheapest = tidy(out.cheapest);
       }
     } else {
       out.bestAchievable = best;
     }
+    // Each moved lever's part of the reduction: how much the peak rises if
+    // that lever alone is put back. Biggest first, by the targeted load.
     out.describe = function (pt) {
-      return {values: pt.vals, result: pt.r, moved: moved(pt.vals).map(function (l) { return {key: l.key, from: l.v0, to: pt.vals[l.key]}; }),
-        change: change(pt.vals), cost: cost(pt.vals)};
+      var byH = goalC == null;
+      var mv = moved(pt.vals).map(function (l) {
+        var back = copy(pt.vals); back[l.key] = l.v0;
+        var r = evaluate(back);
+        return {key: l.key, from: l.v0, to: pt.vals[l.key], saves: {clg: r.clg - pt.r.clg, htg: r.htg - pt.r.htg}};
+      }).sort(function (a, c) { return byH ? c.saves.htg - a.saves.htg : c.saves.clg - a.saves.clg; });
+      return {values: pt.vals, result: pt.r, moved: mv, change: change(pt.vals), cost: cost(pt.vals)};
     };
     return out;
   }
