@@ -94,7 +94,7 @@ table.t th:first-child, table.t td:first-child { text-align: left; }
 table.t thead th { font-size: 11px; color: var(--ink-3); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
 table.t tr.sel td { background: var(--accent-bg); }
 table.t td.num { font-family: var(--mono); }
-.scroll-x { overflow-x: auto; }
+.scroll-x { overflow-x: auto; position: relative; }
 
 .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
 .badge.ep { background: var(--good-bg); color: var(--good); }
@@ -850,7 +850,7 @@ details.factors .field input, details.factors .field select { font: 600 15px var
 }
 
 /* ── Compare (#compare): up to three saved options ──────────────────────── */
-body[data-view="compare"] > .top { display: none; }
+body[data-view="compare"] > .top, body[data-view="campus"] > .top { display: none; }
 .ws-cmp { display: inline-flex; gap: 8px; align-items: center; }
 .ws-cmp a.btn { text-decoration: none; }
 .cmp .ws-head { position: sticky; top: 0; z-index: 3; }
@@ -897,3 +897,29 @@ body[data-view="compare"] > .top { display: none; }
   .cmp-key { margin-left: 0; }
   .cmp-body { padding: 16px 12px 40px; }
 }
+
+/* ── System allowances line and Campus page ─────────────────────────────── */
+.ac-plant { margin: 0; font-size: 14px; display: flex; flex-direction: column; gap: 2px; }
+.ac-plant span { font-size: 12px; color: var(--muted); }
+.ws-head .chg + .chg { margin-left: -2px; }
+.cp-loc { display: flex; align-items: center; gap: 10px; }
+.cp-loc label { font-weight: 700; }
+.cp-loc select { min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 4px; font: inherit; background: var(--surface); }
+.cp-t th, .cp-t td { text-align: left; vertical-align: middle; }
+.cp-t td.num, .cp-t th.num { text-align: right; }
+.cp-in { font: inherit; min-height: 36px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); width: 100%; }
+.cp-name { min-width: 160px; } .cp-num { width: 110px; } .cp-fl { width: 64px; }
+.cp-t select.cp-in { min-width: 150px; }
+.cp-t .rk-hint { display: block; }
+.cp-src { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.cp-t tr.cp-sum th, .cp-t tr.cp-sum td { font-weight: 800; border-top: 2px solid var(--ink); }
+.cp-res h2 { margin: 0 0 10px; font-size: 18px; }
+.cp-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 8px; }
+.cp-chart { margin-top: 18px; }
+.cp-chart h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 14px; }
+.cp-chart h3 svg { width: 14px; height: 14px; }
+.cp-svg { width: 100%; height: auto; display: block; }
+.cp-grid { stroke: var(--line); stroke-width: 1; }
+.cp-ax { font-size: 11px; fill: var(--muted); font-family: var(--font); }
+.cp-chart .cmp-key { margin-left: 0; }
+@media (max-width: 900px) { .cp-kpis { grid-template-columns: minmax(0, 1fr); } }

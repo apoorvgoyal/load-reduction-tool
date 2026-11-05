@@ -211,7 +211,8 @@
     epSens: null, epSensRunning: null, epSensError: null,
     opt: {clg: '', htg: '', levers: {}, result: null, showLevers: false},
     energy: {cop: '', heatSource: 'gas', heatEff: '', sfp: '', efElec: '', efGas: ''}, annual: null, annualRunning: false, annualError: null,
-    engine: null, running: false, runError: null, custom: {}, rebuild: false, compare: [], cmpAll: false};
+    engine: null, running: false, runError: null, custom: {}, rebuild: false, compare: [], cmpAll: false,
+    sys: {vavMin: '', lossC: '', lossH: ''}, campus: {station: null, list: [], ep: {}, running: null, error: null}};
 
   function stationById(id) {
     for (var i = 0; i < D.stations.length; i++) if (D.stations[i].id === id) return D.stations[i];
@@ -243,7 +244,8 @@
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify({type: S.type, station: S.station, czOverride: S.czOverride,
         coolPct: S.coolPct, heatPct: S.heatPct, sc: S.sc, baseline: S.baseline, tab: S.tab, bdMode: S.bdMode, units: S.units,
-        showSources: S.showSources, plant: S.plant, rates: S.rates, energy: S.energy, annual: S.annual, compare: S.compare}));
+        showSources: S.showSources, plant: S.plant, rates: S.rates, energy: S.energy, annual: S.annual, compare: S.compare, sys: S.sys,
+        campus: {station: S.campus.station, list: S.campus.list, ep: S.campus.ep}}));
     } catch (e) { /* storage unavailable: state just isn't remembered */ }
   }
 
@@ -264,6 +266,8 @@
       S.prov = d.provenance; S.verify = d.verify; S.defaults = d.scenario;
       S.sc = s.sc; S.baseline = s.baseline || null;
       S.compare = Array.isArray(s.compare) ? s.compare.slice(0, CMP_MAX) : [];
+      if (s.sys) ['vavMin', 'lossC', 'lossH'].forEach(function (k) { if (s.sys[k] != null) S.sys[k] = s.sys[k]; });
+      if (s.campus) { S.campus.station = s.campus.station || null; S.campus.list = s.campus.list || []; S.campus.ep = s.campus.ep || {}; }
       return true;
     } catch (e) { return false; }
   }
@@ -1383,7 +1387,7 @@
   function render() { renderStatus(); renderView(); save(); }
 
   // ── Views (hash routing: #start, #inputs, #results) ─────────────────────
-  var VIEWS = ['start', 'workspace', 'compare'];
+  var VIEWS = ['start', 'workspace', 'compare', 'campus'];
   function currentView() {
     var v = (location.hash || '').replace('#', '');
     if (v === 'inputs' || v === 'results') {            // old deep links
@@ -1418,6 +1422,8 @@
       cmpButtons();
     } else if (v === 'compare') {
       el.innerHTML = compareView();
+    } else if (v === 'campus') {
+      el.innerHTML = campusView();
     }
     el.setAttribute('data-view', v);
     document.body.setAttribute('data-view', v);
@@ -1694,6 +1700,7 @@
   var COST_SEC = {id: 'cost', title: 'Equipment cost', desc: 'Your own rates, to price the equipment.'};
   function sectionStatus(sec) {
     if (sec.id === 'cost') return ratesAdded() ? {t: 'Rates added', ch: true} : {t: 'Optional', ch: false};
+    if (sec.id === 'system') return sysOn() ? {t: 'Added', ch: true} : {t: 'Optional', ch: false};
     var n = changedCount(sectionQs(sec).map(function (q) { return q.k; }));
     return {t: n ? n + (n === 1 ? ' change' : ' changes') : 'Typical', ch: n > 0};
   }
@@ -1701,12 +1708,12 @@
     var open = S.openSec || 'envelope';
     var h = '<div class="lp"><h1 class="lp-title">Describe your building</h1><p class="lp-sub">Typical values are filled in. Change anything — results on the right update instantly.</p>' +
       '<p class="todo-note">Presets are steps from Typical (most are 20% below or above); each says which. Use Custom for an exact value.</p><div class="acc">';
-    SECTIONS.concat([COST_SEC]).forEach(function (sec, i) {
+    SECTIONS.concat([SYS_SEC, COST_SEC]).forEach(function (sec, i) {
       var isOpen = open === sec.id, stt = sectionStatus(sec);
       h += '<section class="acc-sec' + (isOpen ? ' open' : '') + '" id="sec-' + sec.id + '"><h2 class="acc-h"><button type="button" class="acc-btn" aria-expanded="' + isOpen +
         '" aria-controls="body-' + sec.id + '" data-acc="' + sec.id + '"><span class="n">' + (i + 1) + '</span><span class="acc-t">' + esc(sec.title) + '</span>' +
         '<span class="schip' + (stt.ch ? ' ch' : '') + '" data-status="' + sec.id + '">' + stt.t + '</span><span class="chev" aria-hidden="true"></span></button></h2>' +
-        '<div class="acc-body" id="body-' + sec.id + '"' + (isOpen ? '' : ' hidden') + '>' + (sec.id === 'cost' ? costSectionBody() :
+        '<div class="acc-body" id="body-' + sec.id + '"' + (isOpen ? '' : ' hidden') + '>' + (sec.id === 'cost' ? costSectionBody() : sec.id === 'system' ? sysSectionBody() :
           '<p class="sec-note">' + esc(sec.desc) + '</p>' + sectionQs(sec).map(questionHtml).join('')) + '</div></section>';
     });
     h += '</div><details class="adv2" id="sec-advanced"' + (S.open.advanced ? ' open' : '') + '><summary>Advanced settings</summary><div class="adv-body">';
@@ -1722,7 +1729,7 @@
     var h = '<div class="ws" data-tab="' + tab + '"><header class="ws-head"><a class="brand" href="#start" aria-label="Peak Load Tool, start page">' +
       '<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="6" fill="#15202B"/><path d="M9 22V12l7-4 7 4v10" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="M13 22v-5h6v5" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>' +
       '<span class="brand-title">Peak Load Tool</span></a><span class="ctx-chip">' + icon((TYPE_UI[S.type] || {}).icon, 'ico-xs') + esc(D.archetypes.types[S.type].label) + ' · ' + esc(st.label) + '</span>' +
-      '<a class="chg" href="#start">Change</a><span class="ws-sp"></span><div id="ws-units">' + unitsToggle() + '</div>' +
+      '<a class="chg" href="#start">Change</a><a class="chg" href="#campus">Campus</a><span class="ws-sp"></span><div id="ws-units">' + unitsToggle() + '</div>' +
       '<button type="button" class="btn text" id="b-reset">Reset to typical</button><button type="button" class="btn secondary" id="b-base">Save as baseline</button>' +
       '<span id="ws-cmp" class="ws-cmp">' + cmpButtonsHtml() + '</span>' +
       '<button type="button" class="btn" id="b-report">Download report</button></header>' +
@@ -1731,6 +1738,252 @@
       '<div class="ws-body"><section class="pane pane-in" id="pane-in" aria-label="Inputs">' + leftPane() + '</section>' +
       '<section class="pane pane-out" id="pane-out" aria-label="Results" aria-live="polite">' + rightPane() + '</section></div></div>';
     return h;
+  }
+  // ── System allowances: what the plant sees on top of the space load ─────
+  // The peaks are ideal loads: what the spaces and their outdoor air need,
+  // with no fans, reheat or distribution. These optional, user-entered
+  // allowances add them as separate lines, so the space load stays visible.
+  //   Fan heat (cooling): supply fan power, all taken as heat in the air
+  //     stream: cooling design supply airflow x SFP (the user's W per L/s).
+  //   VAV reheat (heating): an air handler that supplies cold air all winter
+  //     makes the zones reheat it. At the heating design hour the boxes take
+  //     at least min% of the cooling design airflow; heating that air from the
+  //     supply temperature to the heating setpoint costs
+  //     min x V x rho.cp x (T_heat - T_supply). The outdoor air (net of heat
+  //     recovery) already in the ideal load covers part of that: the extra is
+  //     max(0, that - net outdoor-air load). Often zero on a cold design day.
+  //   Distribution losses: a percentage of each, from the user.
+  // Sizing factors apply on top, as they do to the space load.
+  var RHO_CP_AIR = 1.2041 * 1006;    // J/(m3.K): dry air at standard density (20 C, 101.325 kPa), cp 1.006 kJ/(kg.K)
+  function sysInputs() {
+    var p = function (v) { var x = parseFloat(v); return x > 0 ? x : 0; };
+    return {sfp: p(S.energy.sfp), vav: p(S.sys.vavMin) / 100, lc: p(S.sys.lossC) / 100, lh: p(S.sys.lossH) / 100};
+  }
+  function sysOn() { var s = sysInputs(); return s.sfp > 0 || s.vav > 0 || s.lc > 0 || s.lh > 0; }
+  function sysAllow(g, sc) {
+    if (!g || !sysOn()) return null;
+    var s = sysInputs(), c = g.cBlock, h = g.hBlock, out = {cooling: null, heating: null};
+    if (c) {
+      var fan = s.sfp > 0 && c.supply_air_m3s != null ? s.sfp * c.supply_air_m3s * 1000 : 0;
+      var baseC = c.total_w + fan, lossC = baseC * s.lc;
+      out.cooling = {space: c.total_w * g.cf, fan: fan * g.cf, loss: lossC * g.cf, plant: (baseC + lossC) * g.cf,
+        noAirflow: s.sfp > 0 && c.supply_air_m3s == null};
+    }
+    if (h) {
+      var reheat = 0, need = 0;
+      if (s.vav > 0 && c && c.supply_air_m3s != null) {
+        need = s.vav * c.supply_air_m3s * RHO_CP_AIR * Math.max(0, sc.t_heat_c - sc.cooling_supply_air_c);
+        reheat = Math.max(0, need - Math.max(0, (h.outdoor_air_w || 0) - (h.heat_recovery_w || 0)));
+      }
+      var baseH = h.total_w + reheat, lossH = baseH * s.lh;
+      out.heating = {space: h.total_w * g.hf, reheat: reheat * g.hf, reheatAsked: s.vav > 0, loss: lossH * g.hf, plant: (baseH + lossH) * g.hf};
+    }
+    return out;
+  }
+  function plantLine(kind, g, sc) {
+    var a = sysAllow(g, sc), x = a && a[kind];
+    if (!x) return '';
+    var cool = kind === 'cooling', conv = cool ? capC : capH, dp = cool && isIP() ? 1 : 0, unit = ' ' + (cool ? uC() : uH()), parts = [];
+    if (cool && x.fan > 0) parts.push('fan heat +' + fmt(conv(x.fan), dp) + unit);
+    if (cool && x.noAirflow) parts.push('fan heat needs the supply airflow (run a full simulation)');
+    if (!cool && x.reheatAsked) parts.push('VAV reheat +' + fmt(conv(x.reheat), dp) + unit);
+    if (x.loss > 0) parts.push('distribution +' + fmt(conv(x.loss), dp) + unit);
+    if (!parts.length) return '';
+    return '<p class="ac-plant">At the plant: <b>' + fmt(conv(x.plant), dp) + unit + '</b><span>' + esc(parts.join(' · ')) + '</span></p>';
+  }
+  function sysSectionBody() {
+    var sfpU = isIP() ? 'W per cfm' : 'W per L/s', sfpV = S.energy.sfp === '' || S.energy.sfp == null ? '' :
+      (isIP() ? +toIP('W/(L/s)', parseFloat(S.energy.sfp)).toFixed(4) : S.energy.sfp);
+    function box(id, label, tech, val, sfx, step) {
+      return '<div class="qq"><div class="qq-head"><div class="qq-t"><label class="qq-label" for="' + id + '">' + esc(label) + '</label>' +
+        '<span class="qq-tech">' + esc(tech) + '</span></div></div><div class="numbox"><span class="nb-in"><input id="' + id + '" type="number" min="0" step="' + step +
+        '" inputmode="decimal" value="' + esc(val) + '" placeholder="none"><span class="sfx">' + esc(sfx) + '</span></span></div></div>';
+    }
+    return '<p class="sec-note">The peaks on the right are what the spaces need. Add what your system adds on top, from your own design; ' +
+      'each shows as its own line under the peak (“At the plant”). Leave blank for none. The tool has no defaults for these.</p>' +
+      box('f-sys-sfp', 'Fan power', 'Specific fan power of the supply system; all of it taken as heat in the air stream (also used for yearly energy)', sfpV, sfpU, isIP() ? 0.01 : 0.1) +
+      box('f-sys-vavMin', 'VAV minimum airflow', 'Box minimum as a % of the cooling design airflow, for VAV with reheat', S.sys.vavMin, '%', 5) +
+      box('f-sys-lossC', 'Cooling distribution losses', 'Duct and pipe heat gains, as a % of the cooling load', S.sys.lossC, '%', 1) +
+      box('f-sys-lossH', 'Heating distribution losses', 'Duct and pipe heat losses, as a % of the heating load', S.sys.lossH, '%', 1);
+  }
+  var SYS_SEC = {id: 'system', title: 'System allowances', desc: 'Fan heat, reheat and distribution losses on top of the space load.'};
+
+  // ── Campus: many buildings at one location, added up ─────────────────
+  // Instant estimates give each building's own peak; their sum overstates
+  // the campus peak because the buildings don't all peak in the same hour.
+  // EnergyPlus runs return the hour-by-hour load on each design day
+  // (hourly_means_w), so with every building run the campus total is
+  // added hour by hour: its highest hour is the coincident peak.
+  function zoneFor(stationId) {
+    var z = stationById(stationId).climate_zone_stat;
+    return envZones().indexOf(z) >= 0 ? z : z.charAt(0);
+  }
+  function campusStation() { return (S.campus.station && stationById(S.campus.station).id === S.campus.station) ? S.campus.station : S.station; }
+  function campusSc(b) {
+    var st = campusStation(), sc;
+    if (b.sc && b.sc.station === st) sc = JSON.parse(JSON.stringify(b.sc));
+    else { sc = C.defaults(D, b.type, zoneFor(st)).scenario; sc.type = b.type; }
+    sc.station = st; sc.gfa_m2 = b.gfa_m2; sc.n_floors = b.n_floors;
+    return sc;
+  }
+  function campusGov(dd, pfx) {   // governing design-day keys in a trimmed EnergyPlus run
+    var a = dd['clg_db_' + S.coolPct], b = dd['clg_dp_' + S.coolPct];
+    return {c: a && b ? (b.total > a.total ? 'clg_dp_' + S.coolPct : 'clg_db_' + S.coolPct) : a ? 'clg_db_' + S.coolPct : b ? 'clg_dp_' + S.coolPct : null,
+      h: dd['htg_' + S.heatPct] ? 'htg_' + S.heatPct : null};
+  }
+  function campusRow(b) {
+    var sc = campusSc(b), hash = scenarioHash(sc), ep = S.campus.ep[hash];
+    if (ep) {
+      var k = campusGov(ep.dd);
+      return {sc: sc, hash: hash, src: 'energyplus', clg: k.c ? ep.dd[k.c].total * ep.cf : null, htg: k.h ? ep.dd[k.h].total * ep.hf : null, ep: ep};
+    }
+    var res = resultFor(sc, null);
+    if (res.source === 'none') return {sc: sc, hash: hash, src: 'none', reason: res.reason};
+    var g = governed(res, sc);
+    return {sc: sc, hash: hash, src: 'surrogate', clg: g.clg, htg: g.htg};
+  }
+  function campusCoincident(rows) {
+    if (!rows.length || rows.some(function (r) { return r.src !== 'energyplus'; })) return null;
+    function sumOn(key, f) {
+      var tot = null;
+      rows.forEach(function (r) {
+        var d = r.ep.dd[key], fac = f === 'c' ? r.ep.cf : r.ep.hf;
+        if (!d || !d.hourly) { tot = tot || []; tot.missing = true; return; }
+        tot = tot || d.hourly.map(function () { return 0; });
+        d.hourly.forEach(function (v, i) { if (i < tot.length) tot[i] += v * fac; });
+      });
+      return tot;
+    }
+    var best = null;
+    ['clg_db_' + S.coolPct, 'clg_dp_' + S.coolPct].forEach(function (k) {
+      var t = sumOn(k, 'c');
+      if (t && !t.missing) { var m = Math.max.apply(null, t); if (!best || m > best.peak) best = {key: k, peak: m, hourly: t, hour: t.indexOf(m)}; }
+    });
+    var hk = 'htg_' + S.heatPct, ht = sumOn(hk, 'h'), hbest = ht && !ht.missing ? {key: hk, peak: Math.max.apply(null, ht), hourly: ht} : null;
+    if (hbest) hbest.hour = hbest.hourly.indexOf(hbest.peak);
+    return {cooling: best, heating: hbest};
+  }
+  // One colour per building, the same in both charts (categorical, not a load scale).
+  var CP_COLORS = ['#1D5FB4', '#D9822B', '#2E8B57', '#7B4FB0', '#C23B3B', '#13A3A3', '#8A6D1E', '#5B6B7B', '#D45B9A', '#0E3566',
+    '#9BB8E0', '#F2B880', '#93C9A8', '#C2A8E0', '#E59A9A'];
+  function campusChart(kind, rows, co) {
+    var cool = kind === 'cooling', conv = cool ? capC : capH, unit = cool ? uC() : uH(), key = co.key, n = co.hourly.length;
+    var W = 720, H = 220, L = 56, B = 26, T = 10, bw = (W - L - 8) / n, max = co.peak * 1.05;
+    var shades = CP_COLORS, s = '<svg class="cp-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + (cool ? 'Cooling' : 'Heating') +
+      ' load of the whole campus by hour on the ' + esc(DD_LABEL[key] || key) + ' design day, stacked by building">';
+    [0, 0.5, 1].forEach(function (f) {
+      var y = T + (H - T - B) * (1 - f);
+      s += '<line x1="' + L + '" x2="' + W + '" y1="' + y + '" y2="' + y + '" class="cp-grid"/><text x="' + (L - 6) + '" y="' + (y + 4) + '" class="cp-ax" text-anchor="end">' + fmt(conv(max * f), 0) + '</text>';
+    });
+    for (var i = 0; i < n; i++) {
+      var y0 = H - B;
+      rows.forEach(function (r, j) {
+        var v = r.ep.dd[key].hourly[i] * (cool ? r.ep.cf : r.ep.hf), hgt = Math.max(0, v) / max * (H - T - B);
+        s += '<rect x="' + (L + i * bw + 1).toFixed(1) + '" y="' + (y0 - hgt).toFixed(1) + '" width="' + Math.max(1, bw - 2).toFixed(1) + '" height="' + hgt.toFixed(1) +
+          '" fill="' + shades[j % shades.length] + '"' + (i === co.hour ? '' : ' opacity="0.75"') + '><title>' + esc(r.b.name) + ', hour ' + (i + 1) + ': ' + fmt(conv(v), 0) + ' ' + unit + '</title></rect>';
+        y0 -= hgt;
+      });
+      if (i % 3 === 2) s += '<text x="' + (L + (i + 0.5) * bw).toFixed(1) + '" y="' + (H - 8) + '" class="cp-ax" text-anchor="middle">' + (i + 1) + ':00</text>';
+    }
+    s += '<text x="' + L + '" y="' + (T + 2) + '" class="cp-ax" dy="-2">' + unit + '</text></svg>';
+    return '<div class="cp-chart"><h3>' + (cool ? SNOW + 'Campus cooling by hour' : FLAME + 'Campus heating by hour') + ' · ' + esc(DD_LABEL[key] || key) + '</h3>' + s +
+      '<ul class="cmp-key">' + rows.map(function (r, j) { return '<li><i style="background:' + shades[j % shades.length] + '"></i>' + esc(r.b.name) + '</li>'; }).join('') + '</ul>' +
+      '<p class="sub">Hour ending, on the design day. The highest hour (full colour) is the campus peak.</p></div>';
+  }
+  function campusView() {
+    var st = campusStation(), types = D.archetypes.types, rows = S.campus.list.map(function (b) { var r = campusRow(b); r.b = b; return r; });
+    var engineOn = S.engine && S.engine.available, run = S.campus.running;
+    var h = '<div class="cmp"><header class="ws-head"><a class="brand" href="#start" aria-label="Peak Load Tool, start page">' +
+      '<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="6" fill="#15202B"/><path d="M9 22V12l7-4 7 4v10" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="M13 22v-5h6v5" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>' +
+      '<span class="brand-title">Peak Load Tool</span></a><span class="ws-sp"></span><div id="ws-units">' + unitsToggle() + '</div>' +
+      (rows.length ? '<button type="button" class="btn text" id="b-cp-clear">Clear all</button>' : '') +
+      '<a class="btn" href="#workspace">Back to editing</a></header><div class="wrap cmp-body"><h1 class="cmp-title">Campus</h1>' +
+      '<p class="sub">Add each building served by the same plant. Each uses the typical inputs for its type and location, at the size you give, or the inputs it had in the workspace. ' +
+      'Design condition: cooling ' + S.coolPct + '%, heating ' + S.heatPct + '%. System allowances are not included.</p>' +
+      '<div class="cp-loc"><label for="f-cp-station">Location</label><select id="f-cp-station">' + D.stations.map(function (s) {
+        return '<option value="' + s.id + '"' + (s.id === st ? ' selected' : '') + '>' + esc(s.label) + '</option>'; }).join('') + '</select></div>';
+    var aU = isIP() ? 'ft²' : 'm²', conv = function (m2) { return isIP() ? Math.round(m2 * C.FT2_PER_M2) : Math.round(m2); };
+    h += '<section class="card"><div class="scroll-x"><table class="t cp-t"><thead><tr><th>Building</th><th>Type</th><th>Floor area (' + aU + ')</th><th>Floors</th>' +
+      '<th class="num">Cooling (' + uC() + ')</th><th class="num">Heating (' + uH() + ')</th><th>Source</th><th><span class="sr">Remove</span></th></tr></thead><tbody>';
+    rows.forEach(function (r, i) {
+      var b = r.b, dpc = isIP() ? 0 : 0;
+      h += '<tr><td><input class="cp-in cp-name" data-cb="name" data-i="' + i + '" value="' + esc(b.name) + '" maxlength="60" aria-label="Building name"></td>' +
+        '<td><select class="cp-in" data-cb="type" data-i="' + i + '" aria-label="Building type">' + Object.keys(types).map(function (k) {
+          return '<option value="' + k + '"' + (k === b.type ? ' selected' : '') + '>' + esc(types[k].label) + '</option>'; }).join('') + '</select>' +
+          (b.sc ? '<span class="rk-hint">workspace inputs</span>' : '') + '</td>' +
+        '<td><input class="cp-in cp-num" type="number" min="1" step="1000" data-cb="gfa" data-i="' + i + '" value="' + conv(b.gfa_m2) + '" aria-label="Floor area"></td>' +
+        '<td><input class="cp-in cp-fl" type="number" min="1" max="60" step="1" data-cb="floors" data-i="' + i + '" value="' + b.n_floors + '" aria-label="Floors"></td>' +
+        (r.src === 'none' ? '<td class="num">—</td><td class="num">—</td><td class="cp-src">' + (r.reason === 'loading' ? 'Loading…' : 'Needs EnergyPlus') + '</td>' :
+          '<td class="num">' + fmt(capC(r.clg), dpc) + '</td><td class="num">' + fmt(capH(r.htg), 0) + '</td><td class="cp-src">' + (r.src === 'energyplus' ? 'EnergyPlus' : 'Instant estimate') + '</td>') +
+        '<td><button type="button" class="btn text" data-cp-del="' + i + '" aria-label="Remove ' + esc(b.name) + '">Remove</button></td></tr>';
+    });
+    var ok = rows.filter(function (r) { return r.src !== 'none'; }), sumC = 0, sumH = 0;
+    ok.forEach(function (r) { sumC += r.clg; sumH += r.htg; });
+    if (rows.length) {
+      var totA = rows.reduce(function (t, r) { return t + r.b.gfa_m2; }, 0);
+      h += '<tr class="cp-sum"><th scope="row">Sum of building peaks</th><td></td><td>' + fmt(conv(totA), 0) + '</td><td></td><td class="num">' + fmt(capC(sumC), 0) + '</td><td class="num">' + fmt(capH(sumH), 0) + '</td><td class="cp-src">' +
+        (ok.length < rows.length ? (rows.length - ok.length) + ' missing' : '') + '</td><td></td></tr>';
+    }
+    h += '</tbody></table></div><div class="actions"><button type="button" class="btn secondary" id="b-cp-add">Add a building</button>' +
+      '<button type="button" class="btn secondary" id="b-cp-addws">Add the workspace building</button></div></section>';
+    if (!rows.length) return h + '</div></div>';
+    var co = campusCoincident(rows), allEp = !!co;
+    h += '<section class="card cp-res"><h2>Campus peak</h2>';
+    if (co && co.cooling && co.heating) {
+      var dC = co.cooling.peak / sumC, dH = co.heating.peak / sumH;
+      h += '<div class="cp-kpis"><div class="cmp-peak cool"><span class="cmp-pl">' + SNOW + 'Cooling, campus peak</span><span class="cmp-pn">' + fmt(capC(co.cooling.peak), 0) + '<em>' + uC() + '</em></span>' +
+        '<span class="cmp-cost">' + esc(DD_LABEL[co.cooling.key] || co.cooling.key) + ', hour ending ' + (co.cooling.hour + 1) + ':00 · sum of building peaks ' + fmt(capC(sumC), 0) + ' ' + uC() +
+        ' · diversity factor ' + fmt(dC, 2) + '</span></div>' +
+        '<div class="cmp-peak heat"><span class="cmp-pl">' + FLAME + 'Heating, campus peak</span><span class="cmp-pn">' + fmt(capH(co.heating.peak), 0) + '<em>' + uH() + '</em></span>' +
+        '<span class="cmp-cost">' + esc(DD_LABEL[co.heating.key] || co.heating.key) + ', hour ending ' + (co.heating.hour + 1) + ':00 · sum of building peaks ' + fmt(capH(sumH), 0) + ' ' + uH() +
+        ' · diversity factor ' + fmt(dH, 2) + '</span></div></div>' +
+        '<p class="sub">Diversity factor = campus peak ÷ sum of building peaks. All buildings see the same design day, so this is the diversity from when each building peaks, not from different weather.' +
+        (dC > 0.98 && dH > 0.98 ? ' Here the buildings peak in the same hour, so the campus peak equals the sum. Buildings given typical inputs share their type\'s opening hours; where yours differ, set each building\'s hours in the workspace and add it with <b>Add the workspace building</b>.' : '') + '</p>' +
+        campusChart('cooling', rows, co.cooling) + campusChart('heating', rows, co.heating);
+    } else {
+      h += '<p class="sub">The sum above adds each building\'s own peak, which overstates the campus peak when buildings peak at different hours. ' +
+        'The campus peak needs the hour-by-hour load of every building, which comes from a full EnergyPlus run of each (in your browser' +
+        (engineOn && window.EPBrowser ? ', up to ' + window.EPBrowser.maxParallel + ' at a time' : '') + ').</p>';
+    }
+    var need = rows.filter(function (r) { return r.src !== 'energyplus'; }).length;
+    h += '<div class="actions"><button type="button" class="btn" id="b-cp-run"' + (engineOn && !run && need ? '' : ' disabled') + '>' +
+      (run ? esc(run) : need ? 'Run ' + need + ' building' + (need === 1 ? '' : 's') + ' in EnergyPlus' : 'All buildings run in EnergyPlus') + '</button></div>' +
+      (S.campus.error ? '<p class="note warn">' + esc(S.campus.error) + '</p>' : '') + (!engineOn && S.engine ? '<p class="sub">' + esc(S.engine.reason || '') + '</p>' : '');
+    return h + '</section></div></div>';
+  }
+  // Run every building not yet run, a few at a time; keep only what the
+  // campus sum needs (each design day's peak and hour-by-hour load).
+  function campusRun() {
+    if (!window.EPBrowser || S.campus.running) return;
+    var todo = S.campus.list.map(campusSc).filter(function (sc) { return !S.campus.ep[scenarioHash(sc)]; }), done = 0, total = todo.length, failed = [];
+    if (!total) return;
+    S.campus.error = null;
+    S.campus.running = 'Running 0 of ' + total + '…'; render();
+    var queue = todo.slice(), workers = Math.max(1, Math.min(window.EPBrowser.maxParallel || 1, total));
+    function body(sc) { var o = {}; Object.keys(D.fields).forEach(function (k) { if (sc[k] !== undefined) o[k] = sc[k]; }); o.station = sc.station; o.type = sc.type; return o; }
+    function next() {
+      var sc = queue.shift();
+      if (!sc) return Promise.resolve();
+      return window.EPBrowser.run(body(sc), function () {}).then(function (res) {
+        if (res && res.ok !== false && res.design_days) {
+          var dd = {};
+          Object.keys(res.design_days).forEach(function (k) {
+            var d = res.design_days[k];
+            dd[k] = {total: d.block.total_w, hourly: d.hourly_means_w || null, time: d.block.time};
+          });
+          S.campus.ep[scenarioHash(sc)] = {cf: sc.cooling_sizing_factor, hf: sc.heating_sizing_factor, dd: dd};
+        } else failed.push((res && res.error) || 'EnergyPlus run failed');
+      }, function (e) { failed.push(String(e && e.message || e)); }).then(function () {
+        done++; S.campus.running = 'Running ' + done + ' of ' + total + '…'; if (currentView() === 'campus') render();
+        return next();
+      });
+    }
+    var ps = []; for (var i = 0; i < workers; i++) ps.push(next());
+    Promise.all(ps).then(function () {
+      S.campus.running = null;
+      if (failed.length) S.campus.error = failed.length + ' run' + (failed.length === 1 ? '' : 's') + ' failed: ' + failed[0];
+      render();
+    });
   }
   // ── Compare: up to three saved options side by side ─────────────────
   var CMP_MAX = 3;
@@ -1944,6 +2197,7 @@
         '<span class="dchip ' + (d < 0 ? 'down' : 'up') + '">' + (d < 0 ? '▼ ' : '▲ ') + fmt(Math.abs(d), dp) + ' ' + unit +
         (dc != null && Math.round(dc) !== 0 ? ' · ' + (dc < 0 ? '−' : '+') + '$' + fmt(Math.abs(dc), 0) + ' vs ' : (d < 0 ? ' smaller' : ' bigger') + ' than ') + refName + '</span>';
     }
+    h += plantLine(kind, g, S.sc);
     var c = plantCost(kind, w);
     h += '<p class="ac-cost">Equipment cost: ' + (c != null ? '<b>$' + fmt(c, 0) + '</b>' : '<span>add a rate on the left</span>') + '</p></div>';
     return h + '<div class="ac-right"><div class="ac-rt">Where it comes from</div>' + whereFrom(kind, g) + '</div></article>';
@@ -2056,7 +2310,8 @@
     h += row(answerCardV3('cooling', g, ref, refName) + answerCardV3('heating', g, ref, refName), 'Equipment needed',
       '<p>The most cooling or heating the building needs in any one hour on an extreme design day. The equipment is sized for it.</p>' +
       '<p><b>Ton:</b> 12,000 Btu/h (3.517 kW) of cooling. <b>MBH:</b> 1,000 Btu/h (0.293 kW) of heating.</p>' +
-      '<p><b>Where it comes from</b> splits each peak by source at the hour the building peaks.</p>');
+      '<p><b>Where it comes from</b> splits each peak by source at the hour the building peaks.</p>' +
+      '<p>These are space loads. Add fan heat, reheat and distribution losses under <b>System allowances</b> on the left to see the load <b>at the plant</b>.</p>');
     h += row(sensitivityCard('list'), 'Biggest ways to shrink it',
       '<p>Each input moved, on its own, to the end of its realistic range that lowers the peak. Savings don\'t simply add up when combined.</p>' +
       '<p><b>Apply</b> sets the change on the left.</p>');
@@ -2101,7 +2356,7 @@
   }
 
   function refreshInputs() {
-    SECTIONS.concat([COST_SEC]).forEach(function (sec) { var st = sectionStatus(sec); setStatus(sec.id, st); });
+    SECTIONS.concat([SYS_SEC, COST_SEC]).forEach(function (sec) { var st = sectionStatus(sec); setStatus(sec.id, st); });
     Object.keys(S.custom).forEach(function (k) {
       var cv = document.getElementById('cv-' + k);
       if (cv && S.custom[k]) cv.textContent = presetValue(k, S.sc[k]);
@@ -2239,6 +2494,14 @@
 
   function onInput(e) {
     var t = e.target;
+    var sy = t.id && t.id.match(/^f-sys-(\w+)$/);
+    if (sy) {
+      var sv = t.value;
+      if (sy[1] === 'sfp') { S.energy.sfp = sv !== '' && !isNaN(parseFloat(sv)) && isIP() ? +fromIP('W/(L/s)', parseFloat(sv)).toFixed(6) : sv; }
+      else S.sys[sy[1]] = sv;
+      save(); refreshInputs(); return;
+    }
+    if (t.getAttribute && t.getAttribute('data-cb') === 'name') { var cbn = S.campus.list[+t.getAttribute('data-i')]; if (cbn) { cbn.name = t.value; save(); } return; }
     var cn = t.id && t.id.match(/^cmp-name-(\d)$/);
     if (cn) { if (S.compare[+cn[1]]) { S.compare[+cn[1]].name = t.value.trim() || 'Option ' + (+cn[1] + 1); save(); } return; }
     var en = t.id && t.id.match(/^f-e-(\w+)$/);
@@ -2276,6 +2539,16 @@
 
   function onChange(e) {
     var t = e.target;
+    var cb = t.getAttribute && t.getAttribute('data-cb');
+    if (cb && cb !== 'name') {
+      var cbb = S.campus.list[+t.getAttribute('data-i')], cv = parseFloat(t.value);
+      if (!cbb) return;
+      if (cb === 'type') { cbb.type = t.value; cbb.sc = null; }
+      else if (cb === 'gfa' && cv > 0) cbb.gfa_m2 = isIP() ? cv / C.FT2_PER_M2 : cv;
+      else if (cb === 'floors' && cv >= 1) cbb.n_floors = Math.round(cv);
+      render(); return;
+    }
+    if (t.id === 'f-cp-station') { S.campus.station = t.value; render(); return; }
     if (t.id && /^f-rate-/.test(t.id)) { save(); return; }
     if (t.id && /^f-e-(?!heatSource)/.test(t.id)) { render(); return; }
     if (t.id === 'f-type') { S.type = t.value; resetScenario(); S.ep = null; renderInputs(); render(); }
@@ -2355,6 +2628,16 @@
       render();
     } else if (t.id === 'b-clear') { S.baseline = null; render(); }
     else if (t.id === 'b-cmp-save') cmpSave();
+    else if (t.id === 'b-cp-add') {
+      var cd = C.defaults(D, S.type, zoneFor(campusStation())).scenario;
+      S.campus.list.push({name: 'Building ' + (S.campus.list.length + 1), type: S.type, gfa_m2: cd.gfa_m2, n_floors: cd.n_floors, sc: null}); render();
+    } else if (t.id === 'b-cp-addws') {
+      if (!S.campus.list.length) S.campus.station = S.station;
+      S.campus.list.push({name: D.archetypes.types[S.type].label + ' ' + (S.campus.list.length + 1), type: S.type, gfa_m2: S.sc.gfa_m2, n_floors: S.sc.n_floors,
+        sc: S.station === campusStation() ? JSON.parse(JSON.stringify(S.sc)) : null}); render();
+    } else if (t.getAttribute('data-cp-del')) { S.campus.list.splice(+t.getAttribute('data-cp-del'), 1); render(); }
+    else if (t.id === 'b-cp-clear') { S.campus.list = []; S.campus.ep = {}; S.campus.error = null; render(); }
+    else if (t.id === 'b-cp-run') campusRun();
     else if (t.getAttribute('data-cmp-open')) cmpOpen(+t.getAttribute('data-cmp-open'));
     else if (t.getAttribute('data-cmp-del')) { S.compare.splice(+t.getAttribute('data-cmp-del'), 1); render(); }
     else if (t.id === 'b-cmp-clear') { S.compare = []; render(); }

@@ -48,6 +48,13 @@ The surrogate is only used when it passed its independent test against fresh Ene
   - **Plant cost**: capacity × your own $/ton and $/MBH for the plant type you choose. No built-in cost data.
   - **Annual energy and carbon**: see below.
 - **Detailed data tab**: SHR, supply air, ventilation load, the comparison table, EnergyPlus run detail (profiles, component table, zone sizing, IDF and JSON downloads), design conditions, and defaults still awaiting confirmation.
+- **System allowances** (left pane, optional, no defaults). The peaks are ideal loads: what the spaces and their outdoor air need, with no fans, reheat or distribution. When you enter any of these, each answer card adds an **At the plant** line with each allowance shown separately; the space peak itself is unchanged, and costs, comparisons and the optimizer still use it.
+  - *Fan heat* (cooling) = cooling design supply airflow × your specific fan power, all taken as heat in the air stream. The fan power input is the same one the yearly energy uses.
+  - *VAV reheat* (heating): with a cold supply all winter, boxes at their minimum airflow reheat it. Extra heating = max(0, min% × cooling design airflow × ρc<sub>p</sub> × (heating setpoint − cooling supply temperature) − outdoor-air heating load net of recovery), because the outdoor air already in the ideal load covers that much. ρc<sub>p</sub> = 1.2041 kg/m³ × 1006 J/(kg·K). On a cold design day this is often zero; it grows with heat recovery or a mild winter.
+  - *Distribution losses*: your % of each load. Sizing factors apply on top, as they do to the space load.
+  - Not covered: reheat at the cooling design hour (it needs zone-by-zone loads) and economizer control.
+- **Compare** (`#compare`): **Save to compare** keeps up to three versions of the inputs. The page shows their peaks with the change against the first, the breakdown bars on one scale, and the inputs that differ.
+- **Campus** (`#campus`): buildings at one location served by one plant, each with a type, floor area and floors (typical inputs) or the full inputs it had in the workspace. The sum of building peaks comes from the instant estimates. **Run in EnergyPlus** runs each building in the browser and adds their hour-by-hour loads on each design day; the campus peak is the highest hour, and the diversity factor is campus peak ÷ sum of building peaks. All buildings see the same design day, so the diversity comes only from when each building peaks: buildings with the same schedules peak together. System allowances are not included in the campus totals.
 
 ### Annual energy and carbon
 
