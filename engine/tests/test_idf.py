@@ -176,6 +176,19 @@ class GeometryTests(unittest.TestCase):
         self.assertNotIn('GroundFCfactorMethod', text)
         self.assertNotRegex(text, r'Roof,\s*!- Surface Type')
 
+    def test_features_see_the_modelled_exposed_wall(self):
+        # The surrogate's wall-area feature must equal the exterior wall the
+        # IDF builder actually exposes, whatever is adiabatic and however the
+        # building is rotated.
+        from lib import features
+        for over in ({}, {'adiabatic_wall_n': True}, {'adiabatic_wall_e': True, 'adiabatic_wall_s': True, 'north_axis_deg': 30},
+                     {'adiabatic_wall_w': True, 'north_axis_deg': 100, 'aspect_ratio': 2.5},
+                     {'adiabatic_wall_n': True, 'adiabatic_wall_e': True, 'adiabatic_wall_s': True, 'adiabatic_wall_w': True}):
+            sc, _, model = _build(**over)
+            f = dict(zip(features.FEATURES, features.features(sc)))
+            self.assertAlmostEqual(f['ext_wall_m2_per_m2'] * sc['gfa_m2'], model['totals']['ext_wall_m2'],
+                                   delta=1e-6 * max(1.0, model['totals']['ext_wall_m2']), msg=str(over))
+
     def test_all_design_days_present(self):
         _, text, model = _build()
         self.assertEqual(len(model['design_day_env_names']), len(idf.DESIGN_DAY_ORDER))

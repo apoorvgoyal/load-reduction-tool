@@ -27,6 +27,8 @@ sys.path.insert(0, HERE)
 from lib import features, runs, surrogate  # noqa: E402
 
 OUT_JS = os.path.join(os.path.dirname(HERE), 'web', 'data', 'loads-surrogate.js')
+ADIABATIC_FLAGS = ['adiabatic_wall_n', 'adiabatic_wall_e', 'adiabatic_wall_s', 'adiabatic_wall_w',
+                   'adiabatic_roof', 'adiabatic_floor']
 ALPHAS = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0]
 
 
@@ -80,6 +82,12 @@ def stats(y, pred):
 def fit_file(paths, k=5, min_samples=100, btype=None):
     """Fit one type x station from one result file or a list of them (shards)."""
     recs = runs.load([paths] if isinstance(paths, str) else paths)
+    return fit_records(recs, k=k, min_samples=min_samples, btype=btype)
+
+
+def fit_records(recs, k=5, min_samples=100, btype=None, only=None):
+    """Fit from loaded run records. `only(name)` limits the outputs fitted
+    (the learning-curve study fits just the peaks it scores)."""
     if len(recs) < min_samples:
         return None, '%d samples < %d' % (len(recs), min_samples)
     # Features are recomputed from each saved scenario, so a change to the
@@ -87,9 +95,13 @@ def fit_file(paths, k=5, min_samples=100, btype=None):
     Xraw = np.array([features.features(r['scenario']) for r in recs], float)
     mean = Xraw.mean(0)
     std = Xraw.std(0)
-    std[std == 0] = 1.0
+    # A feature that does not vary (or only by rounding noise) is a constant:
+    # leave it unscaled rather than blow its noise up to unit size.
+    std[std < 1e-9 * np.maximum(1.0, np.abs(mean))] = 1.0
     X = expand((Xraw - mean) / std)
     names = sorted(set().union(*[r['targets'].keys() for r in recs]))
+    if only:
+        names = [nm for nm in names if only(nm)]
     rng = np.random.default_rng(0)
     outs = {}
     for name in names:
@@ -131,6 +143,10 @@ def fit_file(paths, k=5, min_samples=100, btype=None):
         'feature_min': [float(x) for x in Xraw.min(0)],
         'feature_max': [float(x) for x in Xraw.max(0)],
         'fixed_inputs': fixed,
+        # On/off inputs that took both values in this model's training runs;
+        # the page asks for EnergyPlus when another one is switched on.
+        'varied_flags': [f for f in ADIABATIC_FLAGS
+                         if len({bool(r['scenario'].get(f)) for r in recs}) == 2],
         'cv_folds': k,
         'outputs': outs,
         'fitted_at': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
@@ -155,7 +171,8 @@ def main(argv):
     if a.only:
         todo = [p for p in todo if ('%s__%s' % p).startswith(a.only)]
     for btype, station in todo:
-        files = runs.files_for(runs_dir, btype, station)
+        # Base runs plus any extended-design-space runs (batch.py --extended).
+        files = runs.files_for(runs_dir, btype, station) + runs.files_for(os.path.join(runs_dir, 'ext'), btype, station)
         m, why = fit_file(files, a.folds, a.min_samples, btype=btype)
         key = '%s|%s' % (btype, station)
         if not m:

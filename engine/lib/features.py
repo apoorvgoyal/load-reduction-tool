@@ -18,7 +18,9 @@ FEATURES = [
     'lpd_w_m2', 'epd_w_m2', 'people_per_m2', 't_cool_c', 't_heat_c', 'core_fraction',
     'orient_cos2', 'orient_sin2', 'aspect_ratio',
     'occ_hours_frac', 'occ_peak_overlap', 'occ_overnight',
+    'exposed_facade_cos', 'exposed_facade_sin',
 ]
+COMPASS = ('n', 'e', 's', 'w')
 
 PEAK_HOURS = range(12, 18)       # 12:00-18:00, when outdoor temperature and west sun peak
 NIGHT_HOURS = range(0, 6)
@@ -37,11 +39,40 @@ def geometry(sc):
     return a, length, width, 2 * (length + width)
 
 
+def facades(sc):
+    """The four sides of the footprint as (true azimuth deg, length m, exposed),
+    in the order and with the compass rule of lib/idf.py (facing): the long
+    sides face building south and north. A side is not exposed when its
+    compass direction is marked adiabatic. Runs made before adiabatic
+    surfaces existed have every side exposed."""
+    a, length, width, _ = geometry(sc)
+    out = []
+    for b, ln in ((180.0, length), (90.0, width), (0.0, length), (270.0, width)):
+        az = (b + sc['north_axis_deg']) % 360.0
+        side = COMPASS[int(math.floor(az / 90.0 + 0.5)) % 4]
+        out.append((az, ln, not sc.get('adiabatic_wall_' + side)))
+    return out
+
+
 def features(sc):
     """Map a resolved scenario to the surrogate feature vector."""
     n, gfa, h = sc['n_floors'], sc['gfa_m2'], sc['floor_to_floor_m']
-    a, length, width, perim = geometry(sc)
+    a, length, width, _ = geometry(sc)
+    fac = facades(sc)
+    # Exposed wall only: adiabatic walls carry no windows, sun or conduction.
+    perim = sum(ln for _, ln, ex in fac if ex)
     ew = perim * h * n / gfa
+    # Which way the exposed facade faces: wall area x cos/sin of its azimuth,
+    # per m2 floor. Zero for a fully exposed rectangle (opposite sides cancel),
+    # where orient_cos2/sin2 carry the orientation.
+    fcos = sum(ln * math.cos(math.radians(az)) for az, ln, ex in fac if ex) * h * n / gfa
+    fsin = sum(ln * math.sin(math.radians(az)) for az, ln, ex in fac if ex) * h * n / gfa
+    # Opposite sides cancel to ~1e-16, not 0: snap to exactly 0 so a fully
+    # exposed building has constant (zero) direction features. web/core.js too.
+    fcos = 0.0 if abs(fcos) < 1e-9 else fcos
+    fsin = 0.0 if abs(fsin) < 1e-9 else fsin
+    roof_on = 0.0 if sc.get('adiabatic_roof') else 1.0
+    slab_on = 0.0 if sc.get('adiabatic_floor') else 1.0
     ppl = 1.0 / sc['m2_per_person']
     # Outdoor air in L/s per m2 floor: 62.1-style rates plus any air-change rate
     # (ACH x floor-to-floor height / 3.6 converts 1/h to L/s per m2). Runs made
@@ -56,8 +87,8 @@ def features(sc):
         ew, sc['wwr'] * ew,
         sc['wall_u'] * (1 - sc['wwr']) * ew,
         sc['win_u'] * sc['wwr'] * ew,
-        sc['roof_u'] / n,
-        sc['slab_f_factor_w_mk'] * perim / gfa,
+        sc['roof_u'] / n * roof_on,
+        sc['slab_f_factor_w_mk'] * perim / gfa * slab_on,
         sc['infiltration_ach'] * h,
         aperture, aperture * sc['overhang_pf'],
         oa, oa * (1 - sc['erv_sensible_eff']), oa * (1 - sc['erv_latent_eff']),
@@ -69,6 +100,7 @@ def features(sc):
         len(occ) / 24.0,
         len(occ & set(PEAK_HOURS)) / float(len(PEAK_HOURS)),
         len(occ & set(NIGHT_HOURS)) / float(len(NIGHT_HOURS)),
+        fcos, fsin,
     ]
 
 

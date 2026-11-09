@@ -517,7 +517,7 @@
         'Re-run <code>python engine/fit_surrogate.py</code> (no new EnergyPlus runs needed), then reload this page.';
     } else if (res.reason === 'fixed') {
       h += 'The instant estimate was trained with these inputs held fixed, and you have changed them: ' + res.fixedDiffs.map(function (d) {
-        if (ADIA_LABEL[d.input]) return '<b>' + esc(ADIA_LABEL[d.input]) + '</b> (every training run had all surfaces exposed)';
+        if (ADIA_LABEL[d.input]) return '<b>' + esc(ADIA_LABEL[d.input]) + '</b> (not varied in this model\'s training runs)';
         return '<b>' + esc(d.input) + '</b> (trained ' + esc(d.trained === null ? 'none' : d.trained) + ', now ' + esc(d.value === null ? 'none' : d.value) + ')';
       }).join(', ') + '.<br>Click <b>Run EnergyPlus</b> for this scenario.';
     } else {
@@ -2077,6 +2077,10 @@
     if (f.max !== undefined) a = Math.max(f.min, Math.min(f.max, a));
     S.sc.infiltration_ach = +a.toPrecision(6);
   }
+  function adiaTrained(on) {
+    var m = SUR[modelKeyFor(S.type, S.station)], v = (m && m.varied_flags) || [];
+    return on.every(function (a) { return v.indexOf(a[0]) >= 0; });
+  }
   function adiabaticHtml(q) {
     var on = ADIA.filter(function (a) { return S.sc[a[0]]; });
     var h = '<div class="qq" id="q-adiabatic"><div class="qq-head"><div class="qq-t"><span class="qq-label" id="ql-adiabatic">' + esc(q.label) + '</span>' +
@@ -2086,7 +2090,7 @@
         return '<button type="button" class="sq' + (v ? ' on' : '') + '" aria-pressed="' + v + '" data-adia="' + a[0] + '">' + esc(a[1]) + '</button>';
       }).join('') + '</div>';
     h += '<p class="sq-desc">' + (on.length ? '<b>Adiabatic:</b> ' + on.map(function (a) { return esc(a[1].toLowerCase()); }).join(', ') +
-      '. No heat flows through them; adiabatic walls have no windows or air leaks. Instant estimates are not trained for this: run a full simulation.' :
+      '. No heat flows through them; adiabatic walls have no windows or air leaks.' + (adiaTrained(on) ? '' : ' The instant estimate for this building type and location is not trained for this yet: run a full simulation.') :
       '<b>All exposed</b> · a stand-alone building. Select the surfaces next to conditioned space (a neighbour, the floor above or below).') + '</p>';
     return h + '</div>';
   }

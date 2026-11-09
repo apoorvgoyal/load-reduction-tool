@@ -14,15 +14,16 @@
     'oa_ls_m2', 'oa_after_sensible_hr', 'oa_after_latent_hr',
     'lpd_w_m2', 'epd_w_m2', 'people_per_m2', 't_cool_c', 't_heat_c', 'core_fraction',
     'orient_cos2', 'orient_sin2', 'aspect_ratio',
-    'occ_hours_frac', 'occ_peak_overlap', 'occ_overnight'];
+    'occ_hours_frac', 'occ_peak_overlap', 'occ_overnight',
+    'exposed_facade_cos', 'exposed_facade_sin'];
 
   // Placeholders for project geometry with no standard default (scenario.py).
   var PLACEHOLDERS = {gfa_m2: 10000, n_floors: 4, aspect_ratio: 1.5, north_axis_deg: 0, overhang_pf: 0,
     erv_sensible_eff: 0, erv_latent_eff: 0, setback_heat_c: null, setup_cool_c: null, thermal_mass: true,
     adiabatic_wall_n: false, adiabatic_wall_e: false, adiabatic_wall_s: false, adiabatic_wall_w: false,
     adiabatic_roof: false, adiabatic_floor: false};
-  // Inputs no trained model has seen: every training run had all surfaces
-  // exposed, so any adiabatic surface needs an EnergyPlus run.
+  // On/off inputs a model can only answer for if its training varied them
+  // (model.varied_flags, from engine/fit_surrogate.py); otherwise EnergyPlus.
   var UNTRAINED_BOOLS = ['adiabatic_wall_n', 'adiabatic_wall_e', 'adiabatic_wall_s', 'adiabatic_wall_w', 'adiabatic_roof', 'adiabatic_floor'];
 
   function defaults(data, type, cz) {
@@ -57,7 +58,17 @@
   function features(sc) {
     var n = +sc.n_floors, gfa = sc.gfa_m2, h = sc.floor_to_floor_m;
     var a = gfa / n, length = Math.sqrt(a * sc.aspect_ratio), width = a / length;
-    var perim = 2 * (length + width), ew = perim * h * n / gfa;
+    // Sides as engine/lib/features.py facades(): exposed wall only.
+    var perim = 0, fcos = 0, fsin = 0;
+    [[180, length], [90, width], [0, length], [270, width]].forEach(function (s) {
+      var az = ((s[0] + (+sc.north_axis_deg)) % 360 + 360) % 360, side = 'nesw'.charAt(Math.floor(az / 90 + 0.5) % 4);
+      if (sc['adiabatic_wall_' + side]) return;
+      perim += s[1]; fcos += s[1] * Math.cos(az * Math.PI / 180); fsin += s[1] * Math.sin(az * Math.PI / 180);
+    });
+    var ew = perim * h * n / gfa, roofOn = sc.adiabatic_roof ? 0 : 1, slabOn = sc.adiabatic_floor ? 0 : 1;
+    fcos *= h * n / gfa; fsin *= h * n / gfa;
+    if (Math.abs(fcos) < 1e-9) fcos = 0;
+    if (Math.abs(fsin) < 1e-9) fsin = 0;
     var ppl = 1 / sc.m2_per_person;
     var oa = sc.oa_per_person_ls * ppl + sc.oa_per_area_ls_m2 + (sc.oa_ach || 0) * h / 3.6;
     var d = sc.perimeter_depth_m;
@@ -69,12 +80,12 @@
     var occ = {}, nOcc = 0, nPeak = 0, nNight = 0, i;
     for (i = 0; i < (+sc.occ_hours); i++) occ[((+sc.occ_start_h) + i) % 24] = true;
     for (i = 0; i < 24; i++) if (occ[i]) { nOcc++; if (i >= 12 && i < 18) nPeak++; if (i < 6) nNight++; }
-    return [ew, sc.wwr * ew, sc.wall_u * (1 - sc.wwr) * ew, sc.win_u * sc.wwr * ew, sc.roof_u / n,
-      sc.slab_f_factor_w_mk * perim / gfa, sc.infiltration_ach * h, aperture, aperture * sc.overhang_pf,
+    return [ew, sc.wwr * ew, sc.wall_u * (1 - sc.wwr) * ew, sc.win_u * sc.wwr * ew, sc.roof_u / n * roofOn,
+      sc.slab_f_factor_w_mk * perim / gfa * slabOn, sc.infiltration_ach * h, aperture, aperture * sc.overhang_pf,
       oa, oa * (1 - sc.erv_sensible_eff), oa * (1 - sc.erv_latent_eff),
       sc.lpd_w_m2, sc.epd_w_m2, ppl, sc.t_cool_c, sc.t_heat_c, core,
       Math.cos(2 * th), Math.sin(2 * th), sc.aspect_ratio,
-      nOcc / 24, nPeak / 6, nNight / 6];
+      nOcc / 24, nPeak / 6, nNight / 6, fcos, fsin];
   }
 
   function expand(z) {
@@ -110,7 +121,9 @@
     Object.keys(model.fixed_inputs || {}).forEach(function (k) {
       if (!sameValue(model.fixed_inputs[k], sc[k])) fixedDiffs.push({input: k, trained: model.fixed_inputs[k], value: sc[k]});
     });
-    UNTRAINED_BOOLS.forEach(function (k) { if (sc[k]) fixedDiffs.push({input: k, trained: false, value: true}); });
+    UNTRAINED_BOOLS.forEach(function (k) {
+      if (sc[k] && (model.varied_flags || []).indexOf(k) < 0) fixedDiffs.push({input: k, trained: false, value: true});
+    });
     var X = expand(z), out = {};
     Object.keys(model.outputs).forEach(function (name) { out[name] = dot(model.outputs[name].coef, X); });
     return {perM2: out, extrapolated: extrap, fixedDiffs: fixedDiffs};

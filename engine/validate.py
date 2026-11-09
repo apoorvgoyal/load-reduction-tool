@@ -39,6 +39,7 @@ import run_scenario  # noqa: E402
 from lib import runs, scenario, surrogate  # noqa: E402
 
 TEST_RUNS = os.path.join(HERE, 'runs', 'test')
+TEST_RUNS_EXT = os.path.join(TEST_RUNS, 'ext')     # extended design space (adiabatic surfaces, large plates)
 REPORT_DIR = os.path.join(HERE, 'validation')
 SURROGATE_JS = os.path.join(os.path.dirname(HERE), 'web', 'data', 'loads-surrogate.js')
 TEST_SEED = 9001          # training uses seed 1; never reuse the training seed here
@@ -52,9 +53,9 @@ def test_cases(btype, station, n, seed):
     return cases
 
 
-def ensure_runs(btype, station, cases, workers, exe, version):
-    os.makedirs(TEST_RUNS, exist_ok=True)
-    path = runs.result_file(TEST_RUNS, btype, station)
+def ensure_runs(btype, station, cases, workers, exe, version, test_dir=TEST_RUNS):
+    os.makedirs(test_dir, exist_ok=True)
+    path = runs.result_file(test_dir, btype, station)
     done = {r['id'] for r in runs.load([path])} if os.path.exists(path) else set()
     todo = [(i, u, exe, version) for i, u in cases if i not in done]
     print('%s/%s: %d test cases, %d to run in EnergyPlus' % (btype, station, len(cases), len(todo)), flush=True)
@@ -252,6 +253,8 @@ def main(argv):
     ap.add_argument('--types', default='all')
     ap.add_argument('--stations', default='all')
     ap.add_argument('--n', type=int, default=50, help='test cases per model (plus the type default)')
+    ap.add_argument('--extended-n', type=int, default=0,
+                    help='extra test cases per model from the extended design space (runs/test/ext/); existing ones are always scored')
     ap.add_argument('--seed', type=int, default=TEST_SEED)
     ap.add_argument('--threshold', type=float, default=5.0)
     ap.add_argument('--workers', type=int, default=max(1, (os.cpu_count() or 2) - 1))
@@ -295,6 +298,13 @@ def main(argv):
                 path, _ = ensure_runs(t, station, cases, a.workers, exe, version)
             wanted = {i for i, _ in cases}
             recs = [r for r in (runs.load([path]) if os.path.exists(path) else []) if r['id'] in wanted]
+            # Extended-design-space test cases (same seed, own folder and ids).
+            ext_path = runs.result_file(TEST_RUNS_EXT, t, station)
+            if a.extended_n and not a.skip_run and t != 'unified':
+                ext_cases = batch.make_samples(t, station, a.extended_n, a.seed, extended=True)
+                ext_path, _ = ensure_runs(t, station, ext_cases, a.workers, exe, version, TEST_RUNS_EXT)
+            if os.path.exists(ext_path):
+                recs += runs.load([ext_path])
             if not recs:
                 per_type[t] = {'error': 'no test runs', 'passed': False}
                 continue

@@ -1,188 +1,204 @@
 {
-  "_readme": "Design-space bounds for training the surrogate (option B). These are sampling ranges, not defaults or recommendations; widen or narrow them per study. 'scale_of_default' and 'offset_of_default' are relative to each building type's default, so every type's defaults sit inside its own trained range. Inputs not listed under 'sampled' are held at the type default during training - if a user changes one of those, the UI marks the surrogate as not applicable and asks for an EnergyPlus run.",
-  "sampled": {
-    "aspect_ratio": {
-      "min": 1.0,
-      "max": 3.0
-    },
-    "epd_w_m2": {
-      "scale_of_default": [
-        0.25,
-        2.0
-      ]
-    },
-    "erv_latent_eff": {
-      "min": 0.0,
-      "max": 0.75
-    },
-    "erv_sensible_eff": {
-      "min": 0.0,
-      "max": 0.85
-    },
-    "floor_plate_m2": {
-      "min": 500,
-      "max": 5000,
-      "_note": "gfa_m2 = floor_plate_m2 * n_floors"
-    },
-    "infiltration_ach": {
-      "min": 0.05,
-      "max": 0.6
-    },
-    "lpd_w_m2": {
-      "scale_of_default": [
-        0.4,
-        1.6
-      ]
-    },
-    "m2_per_person": {
-      "scale_of_default": [
-        0.5,
-        2.0
-      ]
-    },
-    "n_floors": {
-      "min": 1,
-      "max": 15,
-      "int": true
-    },
-    "north_axis_deg": {
-      "min": 0.0,
-      "max": 180.0
-    },
-    "oa_ach": {
-      "scale_of_default": [
-        0.5,
-        2.0
-      ],
-      "_note": "zero for types whose outdoor air is set by 62.1 rates"
-    },
-    "oa_multiplier": {
-      "min": 0.75,
-      "max": 2.0,
-      "_note": "scales both archetype oa_per_person_ls and oa_per_area_ls_m2"
-    },
-    "overhang_pf": {
-      "min": 0.0,
-      "max": 1.0
-    },
-    "roof_u": {
-      "min": 0.1,
-      "max": 0.5
-    },
-    "shgc": {
-      "min": 0.2,
-      "max": 0.6
-    },
-    "t_cool_c": {
-      "offset_of_default": [
-        -2.0,
-        3.0
-      ],
-      "_note": "degrees C added to the type's cooling setpoint"
-    },
-    "t_heat_c": {
-      "offset_of_default": [
-        -3.0,
-        1.0
-      ],
-      "_note": "degrees C added to the type's heating setpoint; capped at 1 C below the sampled cooling setpoint"
-    },
-    "wall_u": {
-      "min": 0.15,
-      "max": 1.0
-    },
-    "win_u": {
-      "min": 1.0,
-      "max": 3.5
-    },
-    "wwr": {
-      "min": 0.1,
-      "max": 0.8
-    }
+ "_readme": "Design-space bounds for training the surrogate (option B). These are sampling ranges, not defaults or recommendations; widen or narrow them per study. 'scale_of_default' and 'offset_of_default' are relative to each building type's default, so every type's defaults sit inside its own trained range. Inputs not listed under 'sampled' are held at the type default during training - if a user changes one of those, the UI marks the surrogate as not applicable and asks for an EnergyPlus run.",
+ "sampled": {
+  "aspect_ratio": {
+   "min": 1.0,
+   "max": 3.0
+  },
+  "epd_w_m2": {
+   "scale_of_default": [
+    0.25,
+    2.0
+   ]
+  },
+  "erv_latent_eff": {
+   "min": 0.0,
+   "max": 0.75
+  },
+  "erv_sensible_eff": {
+   "min": 0.0,
+   "max": 0.85
+  },
+  "floor_plate_m2": {
+   "min": 500,
+   "max": 5000,
+   "_note": "gfa_m2 = floor_plate_m2 * n_floors"
+  },
+  "infiltration_ach": {
+   "min": 0.05,
+   "max": 0.6
+  },
+  "lpd_w_m2": {
+   "scale_of_default": [
+    0.4,
+    1.6
+   ]
+  },
+  "m2_per_person": {
+   "scale_of_default": [
+    0.5,
+    2.0
+   ]
+  },
+  "n_floors": {
+   "min": 1,
+   "max": 15,
+   "int": true
+  },
+  "north_axis_deg": {
+   "min": 0.0,
+   "max": 180.0
+  },
+  "oa_ach": {
+   "scale_of_default": [
+    0.5,
+    2.0
+   ],
+   "_note": "zero for types whose outdoor air is set by 62.1 rates"
+  },
+  "oa_multiplier": {
+   "min": 0.75,
+   "max": 2.0,
+   "_note": "scales both archetype oa_per_person_ls and oa_per_area_ls_m2"
+  },
+  "overhang_pf": {
+   "min": 0.0,
+   "max": 1.0
+  },
+  "roof_u": {
+   "min": 0.1,
+   "max": 0.5
+  },
+  "shgc": {
+   "min": 0.2,
+   "max": 0.6
+  },
+  "t_cool_c": {
+   "offset_of_default": [
+    -2.0,
+    3.0
+   ],
+   "_note": "degrees C added to the type's cooling setpoint"
+  },
+  "t_heat_c": {
+   "offset_of_default": [
+    -3.0,
+    1.0
+   ],
+   "_note": "degrees C added to the type's heating setpoint; capped at 1 C below the sampled cooling setpoint"
+  },
+  "wall_u": {
+   "min": 0.15,
+   "max": 1.0
+  },
+  "win_u": {
+   "min": 1.0,
+   "max": 3.5
+  },
+  "wwr": {
+   "min": 0.1,
+   "max": 0.8
+  }
+ },
+ "fixed_inputs": [
+  "floor_to_floor_m",
+  "perimeter_depth_m",
+  "activity_w_per_person",
+  "unoccupied_internal_fraction",
+  "occ_start_h",
+  "occ_hours",
+  "cooling_supply_air_c",
+  "heating_supply_air_c",
+  "slab_f_factor_w_mk",
+  "thermal_mass",
+  "setback_heat_c",
+  "setup_cool_c",
+  "oa_unoccupied_fraction",
+  "hvac_start_before_occ_h"
+ ],
+ "post_processed": [
+  "cooling_sizing_factor",
+  "heating_sizing_factor"
+ ],
+ "unified": {
+  "_readme": "One shared design space for all building types (model key 'unified|<station>'). A share of samples is drawn around each building type's preset exactly as for a per-type model; the rest are spread across the combined range of every type, with schedules varied too, so in-between buildings are covered.",
+  "preset_share": 0.7,
+  "wide": {
+   "m2_per_person": {
+    "log_min": 0.31,
+    "log_max": 80.0
+   },
+   "lpd_w_m2": {
+    "min": 2.5,
+    "max": 22.0
+   },
+   "epd_w_m2": {
+    "log_min": 2.0,
+    "log_max": 100.0
+   },
+   "oa_per_person_ls": {
+    "min": 0.0,
+    "max": 20.0
+   },
+   "oa_per_area_ls_m2": {
+    "min": 0.0,
+    "max": 1.8
+   },
+   "oa_ach": {
+    "min": 0.0,
+    "max": 12.0,
+    "zero_share": 0.5,
+    "_note": "half the wide samples use no air-change outdoor air"
+   },
+   "t_cool_c": {
+    "min": 20.0,
+    "max": 28.0
+   },
+   "t_heat_c": {
+    "min": 15.0,
+    "max": 23.0,
+    "_note": "capped at 1 C below the sampled cooling setpoint"
+   },
+   "occ_start_h": {
+    "min": 0,
+    "max": 23,
+    "int": true
+   },
+   "occ_hours": {
+    "min": 4,
+    "max": 24,
+    "int": true
+   }
   },
   "fixed_inputs": [
-    "floor_to_floor_m",
-    "perimeter_depth_m",
-    "activity_w_per_person",
-    "unoccupied_internal_fraction",
-    "occ_start_h",
-    "occ_hours",
-    "cooling_supply_air_c",
-    "heating_supply_air_c",
-    "slab_f_factor_w_mk",
-    "thermal_mass",
-    "setback_heat_c",
-    "setup_cool_c",
-    "oa_unoccupied_fraction",
-    "hvac_start_before_occ_h"
-  ],
-  "post_processed": [
-    "cooling_sizing_factor",
-    "heating_sizing_factor"
-  ],
-  "unified": {
-    "_readme": "One shared design space for all building types (model key 'unified|<station>'). A share of samples is drawn around each building type's preset exactly as for a per-type model; the rest are spread across the combined range of every type, with schedules varied too, so in-between buildings are covered.",
-    "preset_share": 0.7,
-    "wide": {
-      "m2_per_person": {
-        "log_min": 0.31,
-        "log_max": 80.0
-      },
-      "lpd_w_m2": {
-        "min": 2.5,
-        "max": 22.0
-      },
-      "epd_w_m2": {
-        "log_min": 2.0,
-        "log_max": 100.0
-      },
-      "oa_per_person_ls": {
-        "min": 0.0,
-        "max": 20.0
-      },
-      "oa_per_area_ls_m2": {
-        "min": 0.0,
-        "max": 1.8
-      },
-      "oa_ach": {
-        "min": 0.0,
-        "max": 12.0,
-        "zero_share": 0.5,
-        "_note": "half the wide samples use no air-change outdoor air"
-      },
-      "t_cool_c": {
-        "min": 20.0,
-        "max": 28.0
-      },
-      "t_heat_c": {
-        "min": 15.0,
-        "max": 23.0,
-        "_note": "capped at 1 C below the sampled cooling setpoint"
-      },
-      "occ_start_h": {
-        "min": 0,
-        "max": 23,
-        "int": true
-      },
-      "occ_hours": {
-        "min": 4,
-        "max": 24,
-        "int": true
-      }
-    },
-    "fixed_inputs": [
-      "floor_to_floor_m",
-      "perimeter_depth_m",
-      "activity_w_per_person",
-      "unoccupied_internal_fraction",
-      "cooling_supply_air_c",
-      "heating_supply_air_c",
-      "slab_f_factor_w_mk",
-      "thermal_mass",
-      "setback_heat_c",
-      "setup_cool_c",
-      "oa_unoccupied_fraction",
-      "hvac_start_before_occ_h"
-    ]
-  }
+   "floor_to_floor_m",
+   "perimeter_depth_m",
+   "activity_w_per_person",
+   "unoccupied_internal_fraction",
+   "cooling_supply_air_c",
+   "heating_supply_air_c",
+   "slab_f_factor_w_mk",
+   "thermal_mass",
+   "setback_heat_c",
+   "setup_cool_c",
+   "oa_unoccupied_fraction",
+   "hvac_start_before_occ_h"
+  ]
+ },
+ "extended": {
+  "_readme": "Extension used by batch.py --extended and validate.py --extended-n (runs in runs/ext/ and runs/test/ext/). Same as sampled, except: floor plates up to 10,000 m2, and each adiabatic surface (four walls by compass side, roof, ground floor) set independently with adiabatic_probability. Design-space bounds, not defaults.",
+  "floor_plate_m2": {
+   "min": 500,
+   "max": 10000
+  },
+  "adiabatic_probability": 0.25,
+  "adiabatic_inputs": [
+   "adiabatic_wall_n",
+   "adiabatic_wall_e",
+   "adiabatic_wall_s",
+   "adiabatic_wall_w",
+   "adiabatic_roof",
+   "adiabatic_floor"
+  ]
+ }
 }

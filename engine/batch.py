@@ -46,9 +46,16 @@ def lhs(n, dims, rng):
     return [[cols[d][i] for d in range(dims)] for i in range(n)]
 
 
-def make_samples(btype, station, n, seed):
+def make_samples(btype, station, n, seed, extended=False):
     with open(os.path.join(HERE, 'variables.json')) as f:
-        space = json.load(f)['sampled']
+        cfg = json.load(f)
+    space = dict(cfg['sampled'])
+    ext = cfg.get('extended') if extended else None
+    if ext:
+        space['floor_plate_m2'] = ext['floor_plate_m2']
+    # Adiabatic flags: their own random stream, so the continuous sample is
+    # an ordinary Latin hypercube whatever the flags do.
+    flag_rng = random.Random('%s|%s|%d|adiabatic' % (btype, station, seed))
     arch = scenario.load_archetypes()['types'][btype]
     names = sorted(space)
     rng = random.Random('%s|%s|%d' % (btype, station, seed))
@@ -78,6 +85,9 @@ def make_samples(btype, station, n, seed):
         user['oa_per_person_ls'] = arch['oa_per_person_ls']['value'] * v['oa_multiplier']
         user['oa_per_area_ls_m2'] = arch['oa_per_area_ls_m2']['value'] * v['oa_multiplier']
         user['gfa_m2'] = v['floor_plate_m2'] * v['n_floors']
+        if ext:
+            for k in ext['adiabatic_inputs']:
+                user[k] = flag_rng.random() < ext['adiabatic_probability']
         out.append((i, user))
     return out
 
@@ -129,11 +139,11 @@ def make_samples_unified(station, n, seed):
     return [(i, user, comp) for i, (user, comp) in enumerate(out)]
 
 
-def samples_for(btype, station, n, seed):
+def samples_for(btype, station, n, seed, extended=False):
     """[(id, user, component)] for a per-type model or the unified one."""
     if btype == UNIFIED:
         return make_samples_unified(station, n, seed)
-    return [(i, u, btype) for i, u in make_samples(btype, station, n, seed)]
+    return [(i, u, btype) for i, u in make_samples(btype, station, n, seed, extended)]
 
 
 def _work(args):
@@ -188,7 +198,10 @@ def main(argv):
     ap.add_argument('--n', type=int, default=500)
     ap.add_argument('--workers', type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--extended', action='store_true',
+                    help='sample the extended design space (variables.json extended) into runs/ext/; use another --seed than the base runs')
     a = ap.parse_args(argv)
+    out_dir = os.path.join(RUNS, 'ext') if a.extended else RUNS
     shard = runs.parse_shard(a.shard) if a.shard else None
 
     exe, version = run_scenario.find_energyplus()
@@ -203,14 +216,14 @@ def main(argv):
     unknown = [t for t in types if t not in scenario.load_archetypes()['types'] and t != UNIFIED]
     if unknown:
         sys.exit('Unknown building type(s): %s' % ', '.join(unknown))
-    os.makedirs(RUNS, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
 
     for btype in types:
         for station in stations:
-            path = runs.result_file(RUNS, btype, station, shard)
+            path = runs.result_file(out_dir, btype, station, shard)
             # Skip ids already done in ANY file for this pair (other shards copied in).
-            done = {r['id'] for r in runs.load(runs.files_for(RUNS, btype, station))}
-            samples = samples_for(btype, station, a.n, a.seed)
+            done = {r['id'] for r in runs.load(runs.files_for(out_dir, btype, station))}
+            samples = samples_for(btype, station, a.n, a.seed, a.extended)
             if shard:
                 samples = [s for s in samples if s[0] % shard[1] == shard[0] - 1]
             todo = [(i, u, exe, version, c) for i, u, c in samples if i not in done]
