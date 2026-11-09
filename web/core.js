@@ -18,7 +18,12 @@
 
   // Placeholders for project geometry with no standard default (scenario.py).
   var PLACEHOLDERS = {gfa_m2: 10000, n_floors: 4, aspect_ratio: 1.5, north_axis_deg: 0, overhang_pf: 0,
-    erv_sensible_eff: 0, erv_latent_eff: 0, setback_heat_c: null, setup_cool_c: null, thermal_mass: true};
+    erv_sensible_eff: 0, erv_latent_eff: 0, setback_heat_c: null, setup_cool_c: null, thermal_mass: true,
+    adiabatic_wall_n: false, adiabatic_wall_e: false, adiabatic_wall_s: false, adiabatic_wall_w: false,
+    adiabatic_roof: false, adiabatic_floor: false};
+  // Inputs no trained model has seen: every training run had all surfaces
+  // exposed, so any adiabatic surface needs an EnergyPlus run.
+  var UNTRAINED_BOOLS = ['adiabatic_wall_n', 'adiabatic_wall_e', 'adiabatic_wall_s', 'adiabatic_wall_w', 'adiabatic_roof', 'adiabatic_floor'];
 
   function defaults(data, type, cz) {
     var arch = data.archetypes, sc = {}, prov = {}, verify = {};
@@ -105,6 +110,7 @@
     Object.keys(model.fixed_inputs || {}).forEach(function (k) {
       if (!sameValue(model.fixed_inputs[k], sc[k])) fixedDiffs.push({input: k, trained: model.fixed_inputs[k], value: sc[k]});
     });
+    UNTRAINED_BOOLS.forEach(function (k) { if (sc[k]) fixedDiffs.push({input: k, trained: false, value: true}); });
     var X = expand(z), out = {};
     Object.keys(model.outputs).forEach(function (name) { out[name] = dot(model.outputs[name].coef, X); });
     return {perM2: out, extrapolated: extrap, fixedDiffs: fixedDiffs};
