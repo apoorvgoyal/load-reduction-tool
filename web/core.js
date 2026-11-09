@@ -105,10 +105,13 @@
 
   // Evaluate a fitted model. Returns per-m2 outputs plus applicability flags.
   function predict(model, sc) {
-    if (JSON.stringify(model.features) !== JSON.stringify(FEATURES)) {
+    // Features are only ever appended: a model fitted on an earlier, shorter
+    // list uses the leading part of today's vector (engine/lib/surrogate.py).
+    var mf = model.features || [];
+    if (!mf.length || JSON.stringify(mf) !== JSON.stringify(FEATURES.slice(0, mf.length))) {
       return {perM2: {}, extrapolated: [], fixedDiffs: [], incompatible: true};
     }
-    var x = features(sc), z = [], i;
+    var x = features(sc).slice(0, mf.length), z = [], i;
     var extrap = [];
     for (i = 0; i < x.length; i++) {
       z.push((x[i] - model.feature_mean[i]) / model.feature_std[i]);
@@ -198,7 +201,7 @@
   // Evaluate only the named outputs (per m2) - the optimizer calls this
   // many thousands of times, so it skips everything else.
   function predictSome(model, sc, names) {
-    var x = features(sc), z = [], i, out = {};
+    var x = features(sc).slice(0, model.feature_mean.length), z = [], i, out = {};
     for (i = 0; i < x.length; i++) z.push((x[i] - model.feature_mean[i]) / model.feature_std[i]);
     var X = expand(z);
     names.forEach(function (n) { out[n] = Math.max(0, dot(model.outputs[n].coef, X)); });

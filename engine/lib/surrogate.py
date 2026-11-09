@@ -81,9 +81,12 @@ def predict(model, sc):
     Returns (outputs, extrapolated_feature_names). Raises ValueError when the
     model was fitted with a different feature list.
     """
-    if model.get('features') != features.FEATURES:
+    mf = model.get('features') or []
+    # Features are only ever appended, so a model fitted on an earlier, shorter
+    # list uses the leading part of today's vector (same values, same order).
+    if not mf or mf != features.FEATURES[:len(mf)]:
         raise ValueError('surrogate was fitted with a different feature set; refit it')
-    x = features.features(sc)
+    x = features.features(sc)[:len(mf)]
     z = [(x[i] - model['feature_mean'][i]) / model['feature_std'][i] for i in range(len(x))]
     extrap = []
     for i, v in enumerate(x):
