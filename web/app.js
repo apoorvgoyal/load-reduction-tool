@@ -227,7 +227,7 @@
     epSens: null, epSensRunning: null, epSensError: null,
     opt: {clg: '', htg: '', levers: {}, result: null, showLevers: false},
     energy: {cop: '', heatSource: 'gas', heatEff: '', sfp: '', efElec: '', efGas: ''}, annual: null, annualRunning: false, annualError: null,
-    engine: null, running: false, runError: null, custom: {}, rebuild: false, compare: [], cmpAll: false,
+    engine: null, running: false, runError: null, custom: {}, rebuild: false, compare: [], cmpAll: false, hiddenMeasures: {},
     sys: {vavMin: '', lossC: '', lossH: ''}, campus: {station: null, list: [], ep: {}, running: null, error: null}};
 
   function stationById(id) {
@@ -260,7 +260,7 @@
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify({type: S.type, station: S.station, czOverride: S.czOverride,
         coolPct: S.coolPct, heatPct: S.heatPct, sc: S.sc, baseline: S.baseline, tab: S.tab, bdMode: S.bdMode, units: S.units,
-        showSources: S.showSources, plant: S.plant, rates: S.rates, energy: S.energy, annual: S.annual, compare: S.compare, sys: S.sys,
+        showSources: S.showSources, plant: S.plant, rates: S.rates, energy: S.energy, annual: S.annual, compare: S.compare, sys: S.sys, hiddenMeasures: S.hiddenMeasures,
         campus: {station: S.campus.station, list: S.campus.list, ep: S.campus.ep}}));
     } catch (e) { /* storage unavailable: state just isn't remembered */ }
   }
@@ -282,6 +282,7 @@
       S.prov = d.provenance; S.verify = d.verify; S.defaults = d.scenario;
       S.sc = s.sc; S.baseline = s.baseline || null;
       S.compare = Array.isArray(s.compare) ? s.compare.slice(0, CMP_MAX) : [];
+      S.hiddenMeasures = s.hiddenMeasures && typeof s.hiddenMeasures === 'object' ? s.hiddenMeasures : {};
       if (s.sys) ['vavMin', 'lossC', 'lossH'].forEach(function (k) { if (s.sys[k] != null) S.sys[k] = s.sys[k]; });
       if (s.campus) { S.campus.station = s.campus.station || null; S.campus.list = s.campus.list || []; S.campus.ep = s.campus.ep || {}; }
       return true;
@@ -805,12 +806,17 @@
       if (best.d < -(heating ? 0.5 : 0.05)) opps.push({key: r.key, v: best.v, d: best.d});
     });
     opps.sort(function (a, b) { return a.d - b.d; });
+    // Measures the user removed (an input they can't change) drop out of the
+    // list; the next one moves up. The technical view still shows every input.
+    var hiddenNow = mode === 'list' ? opps.filter(function (o) { return S.hiddenMeasures[o.key]; }) : [];
+    if (mode === 'list') opps = opps.filter(function (o) { return !S.hiddenMeasures[o.key]; });
     opps = opps.slice(0, mode === 'tech' ? 8 : 5);
     var omx = opps.length ? -opps[0].d : 1;
     if (mode === 'list') {
       var hl = head + '<p class="sub">' + source + ' Each change tried on its own, with everything else as you set it. ' +
         '<b>Apply</b> sets it on the left.</p>' + notes;
-      if (!opps.length) return hl + '<div class="empty-state">Nothing left to improve: every input is already at the end of its realistic range that lowers this peak.</div>' + close;
+      if (!opps.length) return hl + '<div class="empty-state">' + (hiddenNow.length ? 'No measures left: the rest are removed. <button type="button" class="linklike" id="b-show-measures">Show all</button>' :
+        'Nothing left to improve: every input is already at the end of its realistic range that lowers this peak.') + '</div>' + close;
       hl += measureLegend() + '<ol class="ranked">';
       opps.forEach(function (o, i) {
         var pc = basePeak ? -o.d / basePeak * 100 : null;
@@ -819,9 +825,14 @@
           '<span class="rk-hint">' + esc(SWEEP_LABELS[o.key]) + ': ' + sweepValue(o.key, leverValueNow(o.key)) + ' → ' + sweepValue(o.key, o.v) + '</span></div>' +
           '<div class="rk-bar"><span class="' + load + '" style="width:' + (-o.d / omx * 100) + '%"></span></div>' +
           '<div class="rk-val"><b>' + (pc != null ? '−' + fmt(pc, 0) + '%' : '') + '</b><span>−' + fmt(-o.d, dp) + ' ' + unit + '</span></div>' +
-          '<button type="button" class="btn secondary sm" data-apply="' + o.key + '" data-apply-v="' + o.v + '">Apply</button></li>';
+          '<div class="rk-act"><button type="button" class="btn secondary sm" data-apply="' + o.key + '" data-apply-v="' + o.v + '">Apply</button>' +
+          '<button type="button" class="rk-x" data-hide-measure="' + o.key + '" title="Remove from the list (can\'t change this)" aria-label="Remove ' +
+          esc(SWEEP_LABELS[o.key]) + ' from the list">×</button></div></li>';
       });
-      return hl + '</ol>' + (heating ? '<p class="sub">No sun and nobody inside on the coldest morning, so people, lighting, equipment and sun ' +
+      var hidKeys = Object.keys(S.hiddenMeasures).filter(function (k) { return S.hiddenMeasures[k]; });
+      var hidLine = hidKeys.length ? '<p class="rk-hidden">Removed: ' + hidKeys.map(function (k) { return esc(SWEEP_LABELS[k] || k); }).join(', ') +
+        ' · <button type="button" class="linklike" id="b-show-measures">Show all</button></p>' : '';
+      return hl + '</ol>' + hidLine + (heating ? '<p class="sub">No sun and nobody inside on the coldest morning, so people, lighting, equipment and sun ' +
         'cannot lower the heating peak.</p>' : '') + close;
     }
     var h = head + '<p class="sub">' + source + ' Every input swept to the low and high end of its realistic range, everything else as set. ' +
@@ -2646,6 +2657,8 @@
       render();
     } else if (t.id === 'b-clear') { S.baseline = null; render(); }
     else if (t.id === 'b-cmp-save') cmpSave();
+    else if (t.getAttribute('data-hide-measure')) { S.hiddenMeasures[t.getAttribute('data-hide-measure')] = true; save(); refreshRight(); }
+    else if (t.id === 'b-show-measures') { S.hiddenMeasures = {}; save(); refreshRight(); }
     else if (t.id === 'b-cp-add') {
       var cd = C.defaults(D, S.type, zoneFor(campusStation())).scenario;
       S.campus.list.push({name: 'Building ' + (S.campus.list.length + 1), type: S.type, gfa_m2: cd.gfa_m2, n_floors: cd.n_floors, sc: null}); render();
