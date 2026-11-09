@@ -18,6 +18,15 @@
 // setpoints (±1 °C), where a percentage would depend on the scale.
 // value: null means TODO(MEP lead): shown as "to be confirmed".
 //
+// Glazing (win_u), chosen by the user (2026-11-09): single, double or triple
+// pane, or Custom, with no Typical button (noTypical below). Values are the
+// ASHRAE Handbook - Fundamentals, Chapter 15, Table 4 centre-of-glass
+// U-factors for clear, uncoated glass with 13 mm (1/2 in) air gaps:
+// single 1/8 in glass 1.04, double 0.48, triple 0.31 Btu/h-ft2-F
+// (5.91, 2.73, 1.76 W/m2-K). VERIFY against the current edition. They are
+// glass only: the tool's input is the whole-window (assembly) U-factor, which
+// a frame raises, and low-e coatings lower; use Custom for a product value.
+//
 // byType overrides _all for one building type (key as in archetypes.json).
 window.LOADS_PRESETS = {
   _all: {
@@ -25,7 +34,9 @@ window.LOADS_PRESETS = {
     north_axis_deg: [{label: 'Long sides face north and south', value: 0}, {label: 'Turned 45°', value: 45},
       {label: 'Long sides face east and west', value: 90}],
     wwr: [{label: 'Less glass', rel: 0.8}, {label: 'More glass', rel: 1.2}],
-    win_u: [{label: 'Better insulated', rel: 0.8}, {label: 'Less insulated', rel: 1.2}],
+    win_u: [{label: 'Single pane', value: 5.91, note: 'clear glass, centre-of-glass (ASHRAE HOF Ch. 15 Table 4; verify)'},
+      {label: 'Double pane', value: 2.73, note: 'clear glass, 13 mm air gap, centre-of-glass (ASHRAE HOF Ch. 15 Table 4; verify)'},
+      {label: 'Triple pane', value: 1.76, note: 'clear glass, 13 mm air gaps, centre-of-glass (ASHRAE HOF Ch. 15 Table 4; verify)'}],
     shgc: [{label: 'Lets in less sun heat', rel: 0.8}, {label: 'Lets in more sun heat', rel: 1.2}],
     overhang_pf: [{label: 'No shading', value: 0}, {label: 'Some shading', value: 0.25}, {label: 'Deep shading', value: 0.5}],
     wall_u: [{label: 'Better insulated', rel: 0.8}, {label: 'Less insulated', rel: 1.2}],
@@ -43,5 +54,6 @@ window.LOADS_PRESETS = {
     t_heat_c: [{label: 'Cooler', delta: -1}, {label: 'Warmer', delta: 1}],
     t_cool_c: [{label: 'Cooler', delta: -1}, {label: 'Warmer', delta: 1}]
   },
-  byType: {}
+  byType: {},
+  noTypical: ['win_u']
 };

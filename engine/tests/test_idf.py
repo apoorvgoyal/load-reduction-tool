@@ -148,6 +148,34 @@ class GeometryTests(unittest.TestCase):
         vol = sc['gfa_m2'] * sc['floor_to_floor_m']
         self.assertAlmostEqual(q, 0.3 * vol / 3600.0, places=9)
 
+    def test_facing_follows_rotation(self):
+        # Footprint edges, counter-clockwise: south (0,0)->(L,0), east, north, west.
+        L, W = 50.0, 30.0
+        edges = [((0, 0), (L, 0)), ((L, 0), (L, W)), ((L, W), (0, W)), ((0, W), (0, 0))]
+        self.assertEqual([idf.facing(a, b, 0.0) for a, b in edges], ['s', 'e', 'n', 'w'])
+        self.assertEqual([idf.facing(a, b, 90.0) for a, b in edges], ['w', 's', 'e', 'n'])
+
+    def test_adiabatic_walls_roof_floor(self):
+        _, text, model = _build(adiabatic_wall_n=True, adiabatic_wall_e=True)
+        _, text0, model0 = _build()
+        # North and east walls: no windows, no exterior wall area, no infiltration through them.
+        self.assertAlmostEqual(model['totals']['ext_wall_m2'] * 2,
+                               model0['totals']['ext_wall_m2'], delta=0.5 * model0['totals']['ext_wall_m2'])
+        self.assertLess(model['totals']['window_m2'], model0['totals']['window_m2'])
+        for z in model['zones']:
+            if z['name'].endswith('_N') or z['name'].endswith('_E'):
+                self.assertEqual(z['window_m2'], 0.0)
+                self.assertEqual(z['infiltration_m3s'], 0.0)
+        # Total infiltration (the ACH) is unchanged; it goes through the exposed walls.
+        q = sum(z['infiltration_m3s'] * z['scale'] for z in model['zones'])
+        q0 = sum(z['infiltration_m3s'] * z['scale'] for z in model0['zones'])
+        self.assertAlmostEqual(q, q0, places=9)
+        # Roof and ground floor.
+        _, text, model = _build(adiabatic_roof=True, adiabatic_floor=True)
+        self.assertEqual(model['totals']['roof_m2'], 0.0)
+        self.assertNotIn('GroundFCfactorMethod', text)
+        self.assertNotRegex(text, r'Roof,\s*!- Surface Type')
+
     def test_all_design_days_present(self):
         _, text, model = _build()
         self.assertEqual(len(model['design_day_env_names']), len(idf.DESIGN_DAY_ORDER))
@@ -262,6 +290,9 @@ class IddValidationTests(unittest.TestCase):
              'setback_heat_c': 15.6, 'setup_cool_c': 29.4, 'wwr': 0.0},
             {'type': 'lab', 'hvac_start_before_occ_h': 3, 'oa_unoccupied_fraction': 0.5},
             {'occ_days_per_week': 5, '_annual': True},
+            {'adiabatic_wall_n': True, 'adiabatic_wall_w': True, 'adiabatic_roof': True, 'adiabatic_floor': True,
+             'north_axis_deg': 30},
+            {'n_floors': 1, 'gfa_m2': 400, 'adiabatic_wall_e': True, 'adiabatic_wall_s': True},
         ]
         for v in variants:
             ddy = weather.parse_ddy(os.path.join(WEATHER, STEM + '.ddy'))

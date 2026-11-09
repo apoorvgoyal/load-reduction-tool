@@ -938,3 +938,12 @@ body[data-view="compare"] > .top, body[data-view="campus"] > .top { display: non
 .rk-x:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 .rk-hidden { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 .rk-hidden .linklike { font-size: 13px; text-decoration: underline; padding: 0; min-height: 0; }
+/* Adiabatic surfaces: six toggles, three per row */
+.adia { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; background: var(--grey); border-radius: var(--radius-control, 4px); padding: 4px; }
+.adia .sq { min-height: 40px; }
+/* Workspace header: keep one row at desktop widths */
+@media (min-width: 901px) {
+  .ws-head { gap: 8px 10px; }
+  .ws-head .btn { padding-left: 14px; padding-right: 14px; }
+}
+@media (min-width: 901px) and (max-width: 1499px) { .ws .ws-head .brand-title { display: none; } }

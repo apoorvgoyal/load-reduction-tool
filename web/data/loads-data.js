@@ -3073,6 +3073,24 @@ var LOADS_DATA = {
   "thermal_mass": {
    "unit": "bool"
   },
+  "adiabatic_wall_n": {
+   "unit": "bool"
+  },
+  "adiabatic_wall_e": {
+   "unit": "bool"
+  },
+  "adiabatic_wall_s": {
+   "unit": "bool"
+  },
+  "adiabatic_wall_w": {
+   "unit": "bool"
+  },
+  "adiabatic_roof": {
+   "unit": "bool"
+  },
+  "adiabatic_floor": {
+   "unit": "bool"
+  },
   "cooling_sizing_factor": {
    "unit": "-",
    "min": 1.0,

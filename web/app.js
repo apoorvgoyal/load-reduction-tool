@@ -176,7 +176,7 @@
     overhang_pf: 'Overhang PF', m2_per_person: 'Area per person', lpd_w_m2: 'Lighting power',
     epd_w_m2: 'Equipment power', oa_multiplier: 'Outdoor air (× 62.1 rate)', oa_ach: 'Outdoor air ACH',
     erv_sensible_eff: 'ERV sensible eff.',
-    erv_latent_eff: 'ERV latent eff.', infiltration_ach: 'Infiltration ACH', t_cool_c: 'Cooling setpoint',
+    erv_latent_eff: 'ERV latent eff.', infiltration_ach: 'Infiltration', t_cool_c: 'Cooling setpoint',
     t_heat_c: 'Heating setpoint', n_floors: 'Floors (same GFA)', aspect_ratio: 'Aspect ratio',
     north_axis_deg: 'Orientation (0° vs 90°)'
   };
@@ -227,7 +227,7 @@
     epSens: null, epSensRunning: null, epSensError: null,
     opt: {clg: '', htg: '', levers: {}, result: null, showLevers: false},
     energy: {cop: '', heatSource: 'gas', heatEff: '', sfp: '', efElec: '', efGas: ''}, annual: null, annualRunning: false, annualError: null,
-    engine: null, running: false, runError: null, custom: {}, rebuild: false, compare: [], cmpAll: false, hiddenMeasures: {},
+    engine: null, running: false, runError: null, custom: {}, rebuild: false, compare: [], cmpAll: false, hiddenMeasures: {}, infFacade: null,
     sys: {vavMin: '', lossC: '', lossH: ''}, campus: {station: null, list: [], ep: {}, running: null, error: null}};
 
   function stationById(id) {
@@ -260,7 +260,7 @@
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify({type: S.type, station: S.station, czOverride: S.czOverride,
         coolPct: S.coolPct, heatPct: S.heatPct, sc: S.sc, baseline: S.baseline, tab: S.tab, bdMode: S.bdMode, units: S.units,
-        showSources: S.showSources, plant: S.plant, rates: S.rates, energy: S.energy, annual: S.annual, compare: S.compare, sys: S.sys, hiddenMeasures: S.hiddenMeasures,
+        showSources: S.showSources, plant: S.plant, rates: S.rates, energy: S.energy, annual: S.annual, compare: S.compare, sys: S.sys, hiddenMeasures: S.hiddenMeasures, infFacade: S.infFacade,
         campus: {station: S.campus.station, list: S.campus.list, ep: S.campus.ep}}));
     } catch (e) { /* storage unavailable: state just isn't remembered */ }
   }
@@ -283,6 +283,7 @@
       S.sc = s.sc; S.baseline = s.baseline || null;
       S.compare = Array.isArray(s.compare) ? s.compare.slice(0, CMP_MAX) : [];
       S.hiddenMeasures = s.hiddenMeasures && typeof s.hiddenMeasures === 'object' ? s.hiddenMeasures : {};
+      S.infFacade = typeof s.infFacade === 'number' ? s.infFacade : null;
       if (s.sys) ['vavMin', 'lossC', 'lossH'].forEach(function (k) { if (s.sys[k] != null) S.sys[k] = s.sys[k]; });
       if (s.campus) { S.campus.station = s.campus.station || null; S.campus.list = s.campus.list || []; S.campus.ep = s.campus.ep || {}; }
       return true;
@@ -516,6 +517,7 @@
         'Re-run <code>python engine/fit_surrogate.py</code> (no new EnergyPlus runs needed), then reload this page.';
     } else if (res.reason === 'fixed') {
       h += 'The instant estimate was trained with these inputs held fixed, and you have changed them: ' + res.fixedDiffs.map(function (d) {
+        if (ADIA_LABEL[d.input]) return '<b>' + esc(ADIA_LABEL[d.input]) + '</b> (every training run had all surfaces exposed)';
         return '<b>' + esc(d.input) + '</b> (trained ' + esc(d.trained === null ? 'none' : d.trained) + ', now ' + esc(d.value === null ? 'none' : d.value) + ')';
       }).join(', ') + '.<br>Click <b>Run EnergyPlus</b> for this scenario.';
     } else {
@@ -768,7 +770,7 @@
           '%), so these bars are indicative: the direction and ranking are a guide, the sizes are not. Run the exact sweep below for EnergyPlus figures.</div>';
       }
       if (res.fixedDiffs.length) {
-        notes += '<div class="note warn">You have changed inputs the model held fixed (' + res.fixedDiffs.map(function (d) { return esc(d.input); }).join(', ') +
+        notes += '<div class="note warn">You have changed inputs the model held fixed (' + res.fixedDiffs.map(function (d) { return esc(ADIA_LABEL[d.input] || d.input); }).join(', ') +
           '); the bars are for the trained values of those inputs. Run the exact sweep below for EnergyPlus figures.</div>';
       }
       var base = peakOf(sc0);
@@ -957,10 +959,12 @@
 
   // Lever bounds and costs are stored in SI; shown in the selected units.
   function leverDisp(key, v) {
+    if (key === 'infiltration_ach') { var lq = achToFacade(S.sc, v); return lq == null ? 0 : isIP() ? +toIP('L/s-m2', lq).toFixed(4) : +lq.toFixed(3); }
     var u = unitOf(key);
     return isIP() && UNITS[u] ? +toIP(u, v).toFixed(UNITS[u].dp + 1) : +(+v).toFixed(3);
   }
   function leverStep(key) {
+    if (key === 'infiltration_ach') return isIP() ? 0.01 : 0.05;
     var st = null;
     GROUPS.forEach(function (g) { g.fields.forEach(function (f) { if (f[0] === key) st = f[3]; }); });
     if (key === 'oa_multiplier') st = 0.05;
@@ -969,6 +973,7 @@
   function leverFromDisp(key, v) {
     var u = unitOf(key), x = parseFloat(v);
     if (v === '' || isNaN(x)) return v;
+    if (key === 'infiltration_ach') return facadeToAch(S.sc, isIP() ? fromIP('L/s-m2', x) : x);
     return isIP() && UNITS[u] ? fromIP(u, x) : x;
   }
   function leverCostDisp(key, c) {
@@ -1112,7 +1117,7 @@
     if (key === 'overhang_pf') return fmt(v, 2);
     if (key === 'oa_multiplier') return fmt(v, 2) + '× code rate';
     if (key === 'oa_ach') return fmt(v, 1) + ' ACH';
-    if (key === 'infiltration_ach') return fmt(v, 2) + ' ACH';
+    if (key === 'infiltration_ach') return facadeText(S.sc, v);
     if (key === 'lpd_w_m2' || key === 'epd_w_m2') return isIP() ? fmt(toIP('W/m2', v), 2) + ' W/ft²' : fmt(v, 1) + ' W/m²';
     if (key === 't_cool_c' || key === 't_heat_c') return temp(v, 1);
     if (key === 'm2_per_person') return isIP() ? fmt(toIP('m2/person', v), 0) + ' ft²/person' : fmt(v, 1) + ' m²/person';
@@ -1412,7 +1417,7 @@
   // ── Results page ────────────────────────────────────────────────────────
   function renderResults() { renderView(); }
 
-  function render() { renderStatus(); renderView(); save(); }
+  function render() { syncInfiltration(); renderStatus(); renderView(); save(); }
 
   // ── Views (hash routing: #start, #inputs, #results) ─────────────────────
   var VIEWS = ['start', 'workspace', 'compare', 'campus'];
@@ -1562,6 +1567,7 @@
       {k: 'aspect_ratio', label: 'Floor plan shape', tech: 'Plan aspect ratio (length ÷ width)', fx: 'both'},
       {k: 'north_axis_deg', label: 'Which way the long sides face', tech: 'Rotation of the long axis from east', fx: 'cool'}]},
     {id: 'envelope', title: 'Walls & windows', desc: 'How much glass there is, and how well walls, roof and windows keep heat and sun out.', qs: [
+      {k: 'adiabatic', kind: 'adiabatic', label: 'Surfaces shared with conditioned space', tech: 'Adiabatic surfaces (party walls, a floor of a larger building)', fx: 'both'},
       {k: 'wwr', label: 'How much of the wall is glass', tech: 'Window-to-wall ratio', fx: 'both', sketch: true},
       {k: 'win_u', label: 'How well the windows keep heat in', tech: 'Window U-factor (assembly)', fx: 'both'},
       {k: 'shgc', label: 'How much sun heat the windows let in', tech: 'Solar heat gain coefficient (SHGC)', fx: 'cool'},
@@ -1578,7 +1584,7 @@
       {k: 'oa_ach', label: 'Fresh air changes per hour', tech: 'Outdoor air by air changes', fx: 'both', vent: 'ach'},
       {k: 'erv_sensible_eff', label: 'Heat recovery from exhaust air', tech: 'Heat recovery, sensible effectiveness', fx: 'both'},
       {k: 'erv_latent_eff', label: 'Moisture recovery from exhaust air', tech: 'Heat recovery, latent effectiveness', fx: 'cool'},
-      {k: 'infiltration_ach', label: 'Airtightness', tech: 'Infiltration, whole building (air changes per hour)', fx: 'both'}]},
+      {k: 'infiltration_ach', label: 'Airtightness', tech: 'Infiltration per area of exposed facade, in normal operation (not the 75 Pa test rate)', fx: 'both'}]},
     {id: 'schedule', title: 'Schedule & temperatures', desc: 'When the building is used, and how warm or cool it is kept.', qs: [
       {k: 'occ_start_h', label: 'Opens at (hour of day)', tech: 'Occupied from', fx: 'both', kind: 'number'},
       {k: 'occ_hours', label: 'Hours in use per day', tech: 'Occupied hours per day', fx: 'both', kind: 'number'},
@@ -1617,6 +1623,7 @@
   // A value as shown on a preset button.
   function presetValue(k, v) {
     if (v == null) return 'to be confirmed';
+    if (k === 'infiltration_ach') return facadeText(S.sc, v);
     if (k === 'wwr' || k === 'erv_sensible_eff' || k === 'erv_latent_eff') return fmt(v * 100, 0) + '%';
     if (k === 'aspect_ratio') return fmt(v, 1) + ' : 1';
     if (k === 'north_axis_deg') return fmt(v, 0) + '°';
@@ -1642,9 +1649,9 @@
         if (f.min !== undefined) v = Math.max(f.min, Math.min(f.max, v));
         v = +v.toPrecision(6);
       }
-      return {label: p.label, value: v, rel: p.rel, delta: p.delta, typical: same(v, def)};
+      return {label: p.label, value: v, rel: p.rel, delta: p.delta, typical: same(v, def), note: p.note};
     });
-    if (!out.some(function (p) { return p.typical; })) out.splice(Math.min(1, out.length), 0, {label: 'Typical', value: def, typical: true});
+    if (!out.some(function (p) { return p.typical; }) && (P.noTypical || []).indexOf(k) < 0) out.splice(Math.min(1, out.length), 0, {label: 'Typical', value: def, typical: true});
     return out;
   }
   function fxChips(fx) {
@@ -1666,6 +1673,12 @@
   // A number box with its unit as a suffix. Same data-k / data-ip / data-src
   // hooks as fieldHtml, so onInput converts, validates and annotates it.
   function numBox(k, label) {
+    if (k === 'infiltration_ach') {
+      var qv = achToFacade(S.sc, S.sc.infiltration_ach), dq = qv == null ? '' : isIP() ? +toIP('L/s-m2', qv).toFixed(4) : +qv.toFixed(3);
+      return '<div class="numbox"><label class="sr" for="f-inf-facade">' + esc(label) + '</label><span class="nb-in"><input id="f-inf-facade" type="number" min="0" step="' +
+        (isIP() ? 0.01 : 0.05) + '" inputmode="decimal" value="' + dq + '"' + (qv == null ? ' disabled' : '') + '><span class="sfx">' + (isIP() ? 'cfm/ft² facade' : 'L/s·m² facade') + '</span></span>' +
+        '<span class="ip">= ' + fmt(S.sc.infiltration_ach, 3) + ' air changes per hour for this building</span></div>';
+    }
     var spec = fieldSpec(k), unit = spec[2], v = S.sc[k], f = D.fields[k] || {}, st = dispStep(unit, spec[3]);
     var dv = toDisp(unit, v), mn = f.min !== undefined ? toDisp(unit, f.min) : undefined, mx = f.max !== undefined ? toDisp(unit, f.max) : undefined;
     if (mn !== undefined && st > 0) { mn = +(Math.floor(mn / st + 1e-9) * st).toFixed(6); mx = +(Math.ceil(mx / st - 1e-9) * st).toFixed(6); }
@@ -1683,6 +1696,7 @@
     return h;
   }
   function questionHtml(q) {
+    if (q.kind === 'adiabatic') return adiabaticHtml(q);
     var k = q.k, spec = fieldSpec(k), unit = spec[2], v = S.sc[k];
     var vb = S.verify[k] ? ' <span class="verify" title="Default not yet checked against its cited source">verify</span>' : '';
     var h = '<div class="qq" id="q-' + k + '"><div class="qq-head"><div class="qq-t"><span class="qq-label" id="ql-' + k + '">' + esc(q.label) + '</span>' +
@@ -1703,7 +1717,9 @@
     var desc;
     if (sel) desc = '<b>' + esc(sel.typical && sel.label !== 'Typical' ? sel.label : (sel.typical ? 'Typical' : sel.label)) + '</b> · ' + esc(presetValue(k, sel.value)) +
       (sel.typical ? ' — Default for this location' : sel.rel != null ? ' (typical ' + (sel.rel < 1 ? '−' : '+') + fmt(Math.abs(sel.rel - 1) * 100, 0) + '%)' :
-        sel.delta != null ? ' (typical ' + (sel.delta < 0 ? '−' : '+') + (isIP() ? fmt(Math.abs(sel.delta) * 1.8, 1) + ' °F' : fmt(Math.abs(sel.delta), 0) + ' °C') + ')' : '');
+        sel.delta != null ? ' (typical ' + (sel.delta < 0 ? '−' : '+') + (isIP() ? fmt(Math.abs(sel.delta) * 1.8, 1) + ' °F' : fmt(Math.abs(sel.delta), 0) + ' °C') + ')' : '') +
+        (sel.note ? ' — ' + esc(sel.note) : '');
+    else if (S.defaults[k] != null && v != null && Math.abs(v - S.defaults[k]) < 1e-9) desc = '<b>Typical for this location</b> · ' + esc(presetValue(k, v)) + ' — Default for this location';
     else desc = '<b>Custom</b> · <span id="cv-' + k + '">' + esc(presetValue(k, v)) + '</span>';
     h += '<p class="sq-desc">' + desc + '</p>';
     if (!sel) h += numBox(k, q.label + ' (exact value)');
@@ -1729,7 +1745,9 @@
   function sectionStatus(sec) {
     if (sec.id === 'cost') return ratesAdded() ? {t: 'Rates added', ch: true} : {t: 'Optional', ch: false};
     if (sec.id === 'system') return sysOn() ? {t: 'Added', ch: true} : {t: 'Optional', ch: false};
-    var n = changedCount(sectionQs(sec).map(function (q) { return q.k; }));
+    var keys = [];
+    sectionQs(sec).forEach(function (q) { if (q.kind === 'adiabatic') ADIA.forEach(function (a) { keys.push(a[0]); }); else keys.push(q.k); });
+    var n = changedCount(keys);
     return {t: n ? n + (n === 1 ? ' change' : ' changes') : 'Typical', ch: n > 0};
   }
   function leftPane() {
@@ -2013,6 +2031,66 @@
       render();
     });
   }
+  // ── Adiabatic surfaces and infiltration per facade area ────────────────
+  var ADIA = [['adiabatic_wall_n', 'North wall'], ['adiabatic_wall_e', 'East wall'], ['adiabatic_wall_s', 'South wall'],
+    ['adiabatic_wall_w', 'West wall'], ['adiabatic_roof', 'Roof'], ['adiabatic_floor', 'Ground floor']];
+  var ADIA_LABEL = {};
+  ADIA.forEach(function (a) { ADIA_LABEL[a[0]] = a[1] + ' adiabatic'; });
+  // Which compass side each side of the footprint faces after rotation, as
+  // engine/lib/idf.py facing(): the footprint's long sides face building
+  // south and north, its short sides east and west.
+  function facadeSides(sc) {
+    var plate = sc.gfa_m2 / sc.n_floors, L = Math.sqrt(plate * sc.aspect_ratio), W = plate / L, th = +sc.north_axis_deg || 0;
+    return [[180, L], [90, W], [0, L], [270, W]].map(function (x) {
+      var az = ((x[0] + th) % 360 + 360) % 360;
+      return {dir: 'nesw'.charAt(Math.floor(az / 90 + 0.5) % 4), len: x[1]};
+    });
+  }
+  // Exposed (non-adiabatic) wall length around one floor, and the floor plate.
+  function facadeGeom(sc) {
+    var plate = sc.gfa_m2 / sc.n_floors, perim = 0;
+    facadeSides(sc).forEach(function (f) { if (!sc['adiabatic_wall_' + f.dir]) perim += f.len; });
+    return {plate: plate, perim: perim};
+  }
+  // The engine spreads infiltration_ach (per floor volume) over the exposed
+  // walls, so a rate per m2 of exposed facade converts exactly:
+  //   ACH = q (m3/s per m2 facade) x exposed perimeter x 3600 / floor plate area
+  // (the floor-to-floor height cancels).
+  function achToFacade(sc, ach) {
+    var g = facadeGeom(sc);
+    return g.perim > 0 ? ach * g.plate / (g.perim * 3600) * 1000 : null;       // L/s per m2 facade
+  }
+  function facadeToAch(sc, q) {
+    var g = facadeGeom(sc);
+    return g.plate > 0 ? q / 1000 * g.perim * 3600 / g.plate : 0;
+  }
+  function facadeText(sc, ach) {
+    var q = achToFacade(sc, ach);
+    if (q == null) return 'no exposed walls';
+    return isIP() ? fmt(toIP('L/s-m2', q), 3) + ' cfm/ft² facade' : fmt(q, 2) + ' L/s·m² facade';
+  }
+  // Once the user has typed a facade rate, keep it when the geometry or the
+  // adiabatic walls change (the stored air-change rate follows).
+  function syncInfiltration() {
+    if (S.infFacade == null || !S.sc) return;
+    var a = facadeToAch(S.sc, S.infFacade), f = D.fields.infiltration_ach || {};
+    if (f.max !== undefined) a = Math.max(f.min, Math.min(f.max, a));
+    S.sc.infiltration_ach = +a.toPrecision(6);
+  }
+  function adiabaticHtml(q) {
+    var on = ADIA.filter(function (a) { return S.sc[a[0]]; });
+    var h = '<div class="qq" id="q-adiabatic"><div class="qq-head"><div class="qq-t"><span class="qq-label" id="ql-adiabatic">' + esc(q.label) + '</span>' +
+      '<span class="qq-tech">' + esc(q.tech) + '</span></div><div class="fxs">' + fxIcons('both') + '</div></div>' +
+      '<div class="adia" role="group" aria-labelledby="ql-adiabatic">' + ADIA.map(function (a) {
+        var v = !!S.sc[a[0]];
+        return '<button type="button" class="sq' + (v ? ' on' : '') + '" aria-pressed="' + v + '" data-adia="' + a[0] + '">' + esc(a[1]) + '</button>';
+      }).join('') + '</div>';
+    h += '<p class="sq-desc">' + (on.length ? '<b>Adiabatic:</b> ' + on.map(function (a) { return esc(a[1].toLowerCase()); }).join(', ') +
+      '. No heat flows through them; adiabatic walls have no windows or air leaks. Instant estimates are not trained for this: run a full simulation.' :
+      '<b>All exposed</b> · a stand-alone building. Select the surfaces next to conditioned space (a neighbour, the floor above or below).') + '</p>';
+    return h + '</div>';
+  }
+
   // ── Compare: up to three saved options side by side ─────────────────
   var CMP_MAX = 3;
   function cmpSavedIndex() {
@@ -2022,7 +2100,7 @@
   }
   function cmpButtonsHtml() {
     var n = S.compare.length, at = cmpSavedIndex(), save;
-    if (at >= 0) save = '<button type="button" class="btn secondary" disabled>✓ Saved as ' + esc(S.compare[at].name) + '</button>';
+    if (at >= 0) save = '<button type="button" class="btn secondary" disabled>✓ Saved · ' + esc(S.compare[at].name) + '</button>';
     else if (n >= CMP_MAX) save = '<button type="button" class="btn secondary" disabled title="Remove one on the Compare page to save another">' + CMP_MAX + ' saved (most)</button>';
     else save = '<button type="button" class="btn secondary" id="b-cmp-save">Save to compare</button>';
     return save + (n ? '<a class="btn' + (n >= 2 ? '' : ' secondary') + '" href="#compare">Compare (' + n + ')</a>' : '');
@@ -2094,6 +2172,10 @@
     var asked = {};
     SECTIONS.forEach(function (sec) {
       rows += group(sec.title, sec.qs.map(function (q) {
+        if (q.kind === 'adiabatic') return line('Adiabatic surfaces', opts.map(function (o) {
+          var on = ADIA.filter(function (a) { return o.sc[a[0]]; }).map(function (a) { return a[1].toLowerCase(); });
+          return on.length ? on.join(', ') : 'none';
+        }));
         asked[q.k] = true;
         return line(q.label, opts.map(function (o) { return o.sc[q.k] == null ? '–' : presetValue(q.k, o.sc[q.k]); }), q.tech);
       }).join(''));
@@ -2385,6 +2467,7 @@
   }
 
   function refreshInputs() {
+    syncInfiltration();
     SECTIONS.concat([SYS_SEC, COST_SEC]).forEach(function (sec) { var st = sectionStatus(sec); setStatus(sec.id, st); });
     Object.keys(S.custom).forEach(function (k) {
       var cv = document.getElementById('cv-' + k);
@@ -2472,7 +2555,7 @@
   }
   function applyChanges(list) {
     var keys = [];
-    list.forEach(function (c) { S.sc = sweepScenario(S.sc, S.defaults, c.key, c.v); keys.push(questionKey(c.key)); });
+    list.forEach(function (c) { if (c.key === 'infiltration_ach') S.infFacade = null; S.sc = sweepScenario(S.sc, S.defaults, c.key, c.v); keys.push(questionKey(c.key)); });
     if (!keys.length) return;
     var sec = sectionOf(keys[0]);
     if (sec === 'advanced') S.open.advanced = true; else S.openSec = sec;
@@ -2523,6 +2606,13 @@
 
   function onInput(e) {
     var t = e.target;
+    if (t.id === 'f-inf-facade') {
+      var fq = parseFloat(t.value);
+      if (t.value === '' || isNaN(fq) || fq < 0) { t.classList.add('bad'); return; }
+      t.classList.remove('bad');
+      S.infFacade = isIP() ? fromIP('L/s-m2', fq) : fq;
+      syncInfiltration(); save(); refreshInputs(); return;
+    }
     var sy = t.id && t.id.match(/^f-sys-(\w+)$/);
     if (sy) {
       var sv = t.value;
@@ -2602,6 +2692,7 @@
     if (t.getAttribute('data-apply')) { applyChanges([{key: t.getAttribute('data-apply'), v: +t.getAttribute('data-apply-v')}]); return; }
     if (t.getAttribute('data-pk')) {
       var pk = t.getAttribute('data-pk'), pv = +t.getAttribute('data-pv');
+      if (pk === 'infiltration_ach') S.infFacade = null;
       S.sc[pk] = (D.fields[pk] || {}).int ? Math.round(pv) : pv; S.custom[pk] = false; S.rebuild = true; render(); return;
     }
     if (t.getAttribute('data-custom')) {
@@ -2634,7 +2725,7 @@
     if (t.id === 'b-help') { document.getElementById('help').showModal(); return; }
     if (t.id === 'b-help-close') { document.getElementById('help').close(); return; }
     if (t.getAttribute('data-units')) { S.units = t.getAttribute('data-units'); renderStatus(); renderInputs(); render(); return; }
-    if (t.id === 'b-reset') { S.sc = null; S.czOverride = null; S.custom = {}; resetScenario(); renderInputs(); render(); }
+    if (t.id === 'b-reset') { S.infFacade = null; S.sc = null; S.czOverride = null; S.custom = {}; resetScenario(); renderInputs(); render(); }
     else if (t.id === 'b-run') runEnergyPlus();
     else if (t.id === 'b-annual') runAnnual();
     else if (t.id === 'b-epsens') runEpSweep();
@@ -2657,6 +2748,7 @@
       render();
     } else if (t.id === 'b-clear') { S.baseline = null; render(); }
     else if (t.id === 'b-cmp-save') cmpSave();
+    else if (t.getAttribute('data-adia')) { var ak = t.getAttribute('data-adia'); S.sc[ak] = !S.sc[ak]; S.rebuild = true; render(); }
     else if (t.getAttribute('data-hide-measure')) { S.hiddenMeasures[t.getAttribute('data-hide-measure')] = true; save(); refreshRight(); }
     else if (t.id === 'b-show-measures') { S.hiddenMeasures = {}; save(); refreshRight(); }
     else if (t.id === 'b-cp-add') {

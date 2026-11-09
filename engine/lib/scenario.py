@@ -50,6 +50,15 @@ FIELDS = {
     'heating_supply_air_c':         {'unit': 'C', 'min': 25, 'max': 60},
     'slab_f_factor_w_mk':           {'unit': 'W/m-K', 'min': 0.1, 'max': 3},
     'thermal_mass':                 {'unit': 'bool'},
+    # Adiabatic surfaces: next to conditioned space at the same temperature
+    # (a party wall, a floor of a larger building). Walls are named by the
+    # compass direction they face after rotation (north_axis_deg).
+    'adiabatic_wall_n':             {'unit': 'bool'},
+    'adiabatic_wall_e':             {'unit': 'bool'},
+    'adiabatic_wall_s':             {'unit': 'bool'},
+    'adiabatic_wall_w':             {'unit': 'bool'},
+    'adiabatic_roof':               {'unit': 'bool'},
+    'adiabatic_floor':              {'unit': 'bool'},
     'cooling_sizing_factor':        {'unit': '-', 'min': 1.0, 'max': 2.0},
     'heating_sizing_factor':        {'unit': '-', 'min': 1.0, 'max': 2.0},
 }
@@ -67,6 +76,13 @@ GEOMETRY_PLACEHOLDERS = {
     'setback_heat_c': None,
     'setup_cool_c': None,
     'thermal_mass': True,
+    # Every surface exposed unless the user says otherwise (a stand-alone building).
+    'adiabatic_wall_n': False,
+    'adiabatic_wall_e': False,
+    'adiabatic_wall_s': False,
+    'adiabatic_wall_w': False,
+    'adiabatic_roof': False,
+    'adiabatic_floor': False,
 }
 
 

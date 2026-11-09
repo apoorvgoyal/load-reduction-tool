@@ -12,6 +12,11 @@ Model form (documented in README.md):
     peak-load calculation). Slabs carry thermal mass when enabled.
   * Ground floor uses the ASHRAE 90.1 F-factor method with the station's
     0.5 m monthly ground temperatures from the .stat file.
+  * Optional adiabatic surfaces (adiabatic_wall_n/e/s/w, adiabatic_roof,
+    adiabatic_floor) for a building that shares walls with a neighbour or is
+    part of a larger one: those walls keep their construction (thermal mass)
+    but exchange no heat, have no windows and no infiltration; an adiabatic
+    roof or ground floor becomes an interior slab, like the middle floors.
   * HVAC is ZoneHVAC:IdealLoadsAirSystem per zone with outdoor air per
     ASHRAE 62.1 (people + area), optional sensible/enthalpy heat recovery and
     supply-humidity-ratio dehumidification, so the reported loads are the
@@ -131,6 +136,23 @@ def zone_polygons(length, width, depth):
         ('W', [(0, W), (0, 0), (d, d), (d, W - d)], [0]),
         ('C', [(d, d), (L - d, d), (L - d, W - d), (d, W - d)], []),
     ]
+
+
+COMPASS = ('n', 'e', 's', 'w')
+
+
+def facing(a, b, north_axis_deg):
+    """Compass side ('n', 'e', 's' or 'w') an exterior edge a->b of a
+    counter-clockwise footprint faces, after the building is rotated by
+    north_axis_deg (EnergyPlus Building North Axis, clockwise from true north).
+    Mirrored in web/app.js (facadeSides)."""
+    nx, ny = b[1] - a[1], -(b[0] - a[0])            # outward normal
+    az = (math.degrees(math.atan2(nx, ny)) + north_axis_deg) % 360.0
+    return COMPASS[int(math.floor(az / 90.0 + 0.5)) % 4]
+
+
+def is_adiabatic_edge(sc, a, b):
+    return bool(sc.get('adiabatic_wall_' + facing(a, b, float(sc.get('north_axis_deg', 0.0)))))
 
 
 def polygon_area(pts):
@@ -394,13 +416,16 @@ def build(sc, ddy, stat, eplus_version='25.2', annual=False):
     for fkey, z0, scale, is_ground, has_roof in floors:
         zt = z0 + h
         floor_vol = length * width * h
+        # Exterior wall area of this floor, without walls marked adiabatic
+        # (infiltration is shared out over the exposed walls only).
         ext_wall_floor = sum(math.hypot(p[e][0] - p[(e + 1) % len(p)][0], p[e][1] - p[(e + 1) % len(p)][1]) * h
-                             for _, p, ext in polys for e in ext)
+                             for _, p, ext in polys for e in ext
+                             if not is_adiabatic_edge(sc, p[e], p[(e + 1) % len(p)]))
         for suffix, pts, ext_edges in polys:
             zn = '%s_%s' % (fkey, suffix)
             area = polygon_area(pts)
             info = {'name': zn, 'floor': fkey, 'scale': scale, 'floor_m2': area,
-                    'ext_wall_m2': 0.0, 'window_m2': 0.0, 'roof_m2': area if has_roof else 0.0}
+                    'ext_wall_m2': 0.0, 'window_m2': 0.0, 'roof_m2': area if has_roof and not sc.get('adiabatic_roof') else 0.0}
             w.add('Zone', [('Name', zn), ('Direction of Relative North', 0.0), ('X Origin', 0.0),
                            ('Y Origin', 0.0), ('Z Origin', 0.0), ('Type', 1), ('Multiplier', 1)])
             n = len(pts)
@@ -409,7 +434,16 @@ def build(sc, ddy, stat, eplus_version='25.2', annual=False):
                 a, b = pts[e], pts[(e + 1) % n]
                 verts = [(a[0], a[1], zt), (a[0], a[1], z0), (b[0], b[1], z0), (b[0], b[1], zt)]
                 sname = '%s Wall %d' % (zn, e + 1)
-                if e in ext_edges:
+                if e in ext_edges and is_adiabatic_edge(sc, a, b):
+                    # Party wall: the exterior construction (it still stores
+                    # heat) with no heat flow through it, no windows, no sun.
+                    w.add('BuildingSurface:Detailed', [
+                        ('Name', sname), ('Surface Type', 'Wall'), ('Construction Name', 'Ext Wall'),
+                        ('Zone Name', zn), ('Space Name', ''), ('Outside Boundary Condition', 'Adiabatic'),
+                        ('Outside Boundary Condition Object', ''), ('Sun Exposure', 'NoSun'),
+                        ('Wind Exposure', 'NoWind'), ('View Factor to Ground', 'autocalculate')] +
+                        _verts_fields(verts))
+                elif e in ext_edges:
                     seg = math.hypot(b[0] - a[0], b[1] - a[1])
                     exposed_perim += seg
                     info['ext_wall_m2'] += seg * h
@@ -445,7 +479,7 @@ def build(sc, ddy, stat, eplus_version='25.2', annual=False):
                         _verts_fields(verts))
             # Floor (normal down: clockwise seen from above)
             fverts = [(x, y, z0) for x, y in reversed(pts)]
-            if is_ground:
+            if is_ground and not sc.get('adiabatic_floor'):
                 cname = '%s FFloor' % zn
                 w.add('Construction:FfactorGroundFloor', [
                     ('Name', cname), ('F-Factor', float(sc['slab_f_factor_w_mk'])),
@@ -464,7 +498,7 @@ def build(sc, ddy, stat, eplus_version='25.2', annual=False):
                     ('Wind Exposure', 'NoWind'), ('View Factor to Ground', 'autocalculate')] +
                     _verts_fields(fverts))
             cverts = [(x, y, zt) for x, y in pts]
-            if has_roof:
+            if has_roof and not sc.get('adiabatic_roof'):
                 w.add('BuildingSurface:Detailed', [
                     ('Name', zn + ' Roof'), ('Surface Type', 'Roof'), ('Construction Name', 'Roof'),
                     ('Zone Name', zn), ('Space Name', ''), ('Outside Boundary Condition', 'Outdoors'),
