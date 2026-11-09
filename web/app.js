@@ -181,6 +181,22 @@
     north_axis_deg: 'Orientation (0° vs 90°)'
   };
 
+  // Measure groups for the ranked list: each input belongs to one.
+  // Window area changes both conduction and sun; it is listed as solar for
+  // cooling and as conduction for heating (no sun at the heating peak).
+  var MEASURE_GROUPS = [['light', 'Lighting'], ['internal', 'Internal loads'], ['hvac', 'HVAC'], ['vent', 'Ventilation & infiltration'],
+    ['cond', 'Envelope, conduction'], ['solar', 'Envelope, solar']];
+  var MEASURE_GROUP = {lpd_w_m2: 'light', epd_w_m2: 'internal', m2_per_person: 'internal',
+    erv_sensible_eff: 'hvac', erv_latent_eff: 'hvac', t_cool_c: 'hvac', t_heat_c: 'hvac', hvac_start_before_occ_h: 'hvac',
+    oa_multiplier: 'vent', oa_ach: 'vent', infiltration_ach: 'vent',
+    win_u: 'cond', wall_u: 'cond', roof_u: 'cond', aspect_ratio: 'cond', n_floors: 'cond',
+    shgc: 'solar', overhang_pf: 'solar', north_axis_deg: 'solar'};
+  function measureGroup(key, heating) { return key === 'wwr' ? (heating ? 'cond' : 'solar') : MEASURE_GROUP[key] || 'cond'; }
+  function measureLegend() {
+    return '<ul class="mg-key" aria-label="Measure groups">' + MEASURE_GROUPS.map(function (g) {
+      return '<li><i class="mg-' + g[0] + '"></i>' + esc(g[1]) + '</li>'; }).join('') + '</ul>';
+  }
+
   var DD_LABEL = {
     'htg_99.6': 'Heating 99.6%', 'htg_99': 'Heating 99%',
     'clg_db_0.4': 'Cooling 0.4% DB/MCWB', 'clg_db_1': 'Cooling 1% DB/MCWB', 'clg_db_2': 'Cooling 2% DB/MCWB',
@@ -719,7 +735,7 @@
     var engineOn = S.engine && S.engine.available, hash = scenarioHash(S.sc), sc0 = S.sc, def = S.defaults;
     var ep = S.epSens && S.epSens.hash === hash && S.epSens.done ? S.epSens : null;
     var head = mode === 'tech' ? '<div class="card"><h2>Each input at both ends of its range (' + (heating ? 'heating' : 'cooling') + ')</h2>' :
-      '<section class="card r-card" id="ranked"><div class="r-head"><h2>Biggest ways to shrink it</h2>' +
+      '<section class="card r-card" id="ranked"><div class="r-head"><h2>Top 5 measures to reduce peak load</h2>' +
       seg('tzLoad', [['cooling', 'Cooling'], ['heating', 'Heating']], S.tzLoad).replace('class="seg"', 'class="seg dark"') + '</div>';
     var close = mode === 'tech' ? '</div>' : '</section>';
     var unit = heating ? uH() : uC(), dp = heating || !isIP() ? 0 : 1;
@@ -795,10 +811,11 @@
       var hl = head + '<p class="sub">' + source + ' Each change tried on its own, with everything else as you set it. ' +
         '<b>Apply</b> sets it on the left.</p>' + notes;
       if (!opps.length) return hl + '<div class="empty-state">Nothing left to improve: every input is already at the end of its realistic range that lowers this peak.</div>' + close;
-      hl += '<ol class="ranked">';
+      hl += measureLegend() + '<ol class="ranked">';
       opps.forEach(function (o, i) {
         var pc = basePeak ? -o.d / basePeak * 100 : null;
-        hl += '<li><span class="rk">' + (i + 1) + '</span><div class="rk-text"><b>' + plainAction(o.key, o.v, heating) + '</b>' +
+        var mg = measureGroup(o.key, heating), mgName = MEASURE_GROUPS.filter(function (g) { return g[0] === mg; })[0][1];
+        hl += '<li><span class="rk mg-' + mg + '" title="' + esc(mgName) + '"><span class="sr">' + esc(mgName) + ', </span>' + (i + 1) + '</span><div class="rk-text"><b>' + plainAction(o.key, o.v, heating) + '</b>' +
           '<span class="rk-hint">' + esc(SWEEP_LABELS[o.key]) + ': ' + sweepValue(o.key, leverValueNow(o.key)) + ' → ' + sweepValue(o.key, o.v) + '</span></div>' +
           '<div class="rk-bar"><span class="' + load + '" style="width:' + (-o.d / omx * 100) + '%"></span></div>' +
           '<div class="rk-val"><b>' + (pc != null ? '−' + fmt(pc, 0) + '%' : '') + '</b><span>−' + fmt(-o.d, dp) + ' ' + unit + '</span></div>' +
@@ -2120,7 +2137,7 @@
     cooling: [['sun', 'Sun through windows', ['window_solar']], ['inside', 'Lights & equipment', ['lighting', 'equipment']],
       ['air', 'Fresh air', ['ventilation']], ['people', 'People', ['people']],
       ['shell', 'Walls, roof & glass', ['walls', 'roof', 'ground_floor', 'window_conduction']], ['leaks', 'Air leaks', ['infiltration']]],
-    heating: [['air', 'Fresh air', ['ventilation']], ['shell', 'Walls, roof & warm-up', ['walls', 'roof', 'ground_floor', 'internal_mass']],
+    heating: [['air', 'Fresh air', ['ventilation']], ['shell', 'Walls & roof', ['walls', 'roof', 'ground_floor']],
       ['win', 'Windows', ['window_conduction', 'window_solar']], ['leaks', 'Air leaks', ['infiltration']]]
   };
   var BD_SHADES = {cooling: ['#0E3566', '#1D5FB4', '#4A80C7', '#7AA3D8', '#A9C4E7', '#CFDDF2'],
@@ -2312,8 +2329,9 @@
       '<p><b>Ton:</b> 12,000 Btu/h (3.517 kW) of cooling. <b>MBH:</b> 1,000 Btu/h (0.293 kW) of heating.</p>' +
       '<p><b>Where it comes from</b> splits each peak by source at the hour the building peaks.</p>' +
       '<p>These are space loads. Add fan heat, reheat and distribution losses under <b>System allowances</b> on the left to see the load <b>at the plant</b>.</p>');
-    h += row(sensitivityCard('list'), 'Biggest ways to shrink it',
+    h += row(sensitivityCard('list'), 'Top 5 measures',
       '<p>Each input moved, on its own, to the end of its realistic range that lowers the peak. Savings don\'t simply add up when combined.</p>' +
+      '<p>Numbers are coloured by group: lighting, internal loads (people and equipment), HVAC (setpoints, heat recovery), ventilation & infiltration, and envelope split into conduction (insulation, glazing U, shape) and solar (SHGC, shading, orientation). Window area counts as solar for cooling and conduction for heating.</p>' +
       '<p><b>Apply</b> sets the change on the left.</p>');
     if (g) h += row(optimizerCard(g), 'Set a goal',
       '<p>Enter how much smaller you want each peak. The tool searches combinations of changes in the trained model and suggests a plan.</p>' +
