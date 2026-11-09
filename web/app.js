@@ -182,16 +182,19 @@
   };
 
   // Measure groups for the ranked list: each input belongs to one.
-  // Domestic hot water is listed for completeness; the tool does not model
-  // it, so no measure falls in it.
-  var MEASURE_GROUPS = [['light', 'Lighting'], ['hvac', 'HVAC'], ['dhw', 'Domestic hot water'], ['internal', 'Internal loads'], ['env', 'Envelope']];
+  // Window area changes both conduction and sun; it is listed as solar for
+  // cooling and as conduction for heating (no sun at the heating peak).
+  var MEASURE_GROUPS = [['light', 'Lighting'], ['internal', 'Internal loads'], ['hvac', 'HVAC'], ['vent', 'Ventilation & infiltration'],
+    ['cond', 'Envelope, conduction'], ['solar', 'Envelope, solar']];
   var MEASURE_GROUP = {lpd_w_m2: 'light', epd_w_m2: 'internal', m2_per_person: 'internal',
-    oa_multiplier: 'hvac', oa_ach: 'hvac', erv_sensible_eff: 'hvac', erv_latent_eff: 'hvac', t_cool_c: 'hvac', t_heat_c: 'hvac',
-    hvac_start_before_occ_h: 'hvac', wwr: 'env', win_u: 'env', shgc: 'env', overhang_pf: 'env', wall_u: 'env', roof_u: 'env',
-    infiltration_ach: 'env', aspect_ratio: 'env', north_axis_deg: 'env', n_floors: 'env'};
+    erv_sensible_eff: 'hvac', erv_latent_eff: 'hvac', t_cool_c: 'hvac', t_heat_c: 'hvac', hvac_start_before_occ_h: 'hvac',
+    oa_multiplier: 'vent', oa_ach: 'vent', infiltration_ach: 'vent',
+    win_u: 'cond', wall_u: 'cond', roof_u: 'cond', aspect_ratio: 'cond', n_floors: 'cond',
+    shgc: 'solar', overhang_pf: 'solar', north_axis_deg: 'solar'};
+  function measureGroup(key, heating) { return key === 'wwr' ? (heating ? 'cond' : 'solar') : MEASURE_GROUP[key] || 'cond'; }
   function measureLegend() {
     return '<ul class="mg-key" aria-label="Measure groups">' + MEASURE_GROUPS.map(function (g) {
-      return '<li><i class="mg-' + g[0] + '"></i>' + esc(g[1]) + (g[0] === 'dhw' ? ' <span>(not modelled)</span>' : '') + '</li>'; }).join('') + '</ul>';
+      return '<li><i class="mg-' + g[0] + '"></i>' + esc(g[1]) + '</li>'; }).join('') + '</ul>';
   }
 
   var DD_LABEL = {
@@ -811,7 +814,7 @@
       hl += measureLegend() + '<ol class="ranked">';
       opps.forEach(function (o, i) {
         var pc = basePeak ? -o.d / basePeak * 100 : null;
-        var mg = MEASURE_GROUP[o.key] || 'env', mgName = MEASURE_GROUPS.filter(function (g) { return g[0] === mg; })[0][1];
+        var mg = measureGroup(o.key, heating), mgName = MEASURE_GROUPS.filter(function (g) { return g[0] === mg; })[0][1];
         hl += '<li><span class="rk mg-' + mg + '" title="' + esc(mgName) + '"><span class="sr">' + esc(mgName) + ', </span>' + (i + 1) + '</span><div class="rk-text"><b>' + plainAction(o.key, o.v, heating) + '</b>' +
           '<span class="rk-hint">' + esc(SWEEP_LABELS[o.key]) + ': ' + sweepValue(o.key, leverValueNow(o.key)) + ' → ' + sweepValue(o.key, o.v) + '</span></div>' +
           '<div class="rk-bar"><span class="' + load + '" style="width:' + (-o.d / omx * 100) + '%"></span></div>' +
@@ -2328,7 +2331,7 @@
       '<p>These are space loads. Add fan heat, reheat and distribution losses under <b>System allowances</b> on the left to see the load <b>at the plant</b>.</p>');
     h += row(sensitivityCard('list'), 'Top 5 measures',
       '<p>Each input moved, on its own, to the end of its realistic range that lowers the peak. Savings don\'t simply add up when combined.</p>' +
-      '<p>Numbers are coloured by group: lighting, HVAC, domestic hot water, internal loads (people and equipment) and envelope. Domestic hot water is not modelled, so no measure falls in it.</p>' +
+      '<p>Numbers are coloured by group: lighting, internal loads (people and equipment), HVAC (setpoints, heat recovery), ventilation & infiltration, and envelope split into conduction (insulation, glazing U, shape) and solar (SHGC, shading, orientation). Window area counts as solar for cooling and conduction for heating.</p>' +
       '<p><b>Apply</b> sets the change on the left.</p>');
     if (g) h += row(optimizerCard(g), 'Set a goal',
       '<p>Enter how much smaller you want each peak. The tool searches combinations of changes in the trained model and suggests a plan.</p>' +
