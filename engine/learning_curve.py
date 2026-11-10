@@ -33,10 +33,7 @@ TRAIN_DIR = os.path.join(HERE, 'runs')
 
 def curve(key, sizes, repeats, threshold, extra_dirs=()):
     btype, station = key.split('|')
-    paths = runs.files_for(TRAIN_DIR, btype, station)
-    for d in extra_dirs:
-        paths += runs.files_for(d, btype, station)
-    train = runs.load(paths)
+    train = runs.load_sets([TRAIN_DIR] + list(extra_dirs), btype, station)
     test = runs.load([runs.result_file(validate.TEST_RUNS, btype, station)])
     only = lambda name: name.endswith('|total_w_m2')  # noqa: E731
     out = {'key': key, 'n_train': len(train), 'n_test': len(test), 'points': []}

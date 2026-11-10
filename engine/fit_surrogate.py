@@ -172,8 +172,8 @@ def main(argv):
         todo = [p for p in todo if ('%s__%s' % p).startswith(a.only)]
     for btype, station in todo:
         # Base runs plus any extended-design-space runs (batch.py --extended).
-        files = runs.files_for(runs_dir, btype, station) + runs.files_for(os.path.join(runs_dir, 'ext'), btype, station)
-        m, why = fit_file(files, a.folds, a.min_samples, btype=btype)
+        recs = runs.load_sets([runs_dir, os.path.join(runs_dir, 'ext')], btype, station)
+        m, why = fit_records(recs, a.folds, a.min_samples, btype=btype)
         key = '%s|%s' % (btype, station)
         if not m:
             print('skip %s: %s' % (key, why))

@@ -57,6 +57,18 @@ def load(paths):
     return [by_id[k] for k in sorted(by_id)]
 
 
+def load_sets(runs_dirs, btype, station):
+    """Records for one type x station from several run directories (for example
+    runs/ and runs/ext/). Sample ids are unique only within one directory (each
+    batch numbers its samples from 0), so each directory is loaded on its own
+    and the sets are concatenated; loading them together would let one set's
+    records replace the other's."""
+    out = []
+    for d in runs_dirs:
+        out += load(files_for(d, btype, station))
+    return out
+
+
 def parse_shard(text):
     """'2/4' -> (2, 4)."""
     m = re.match(r'^\s*(\d+)\s*/\s*(\d+)\s*$', text or '')

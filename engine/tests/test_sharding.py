@@ -55,5 +55,25 @@ class ShardTests(unittest.TestCase):
             runs.parse_shard('5/4')
 
 
+
+class LoadSetsTests(unittest.TestCase):
+    def test_sets_with_the_same_ids_are_all_kept(self):
+        # Base and extended batches both number samples from 0; combining them
+        # must keep every record, not let one set replace the other.
+        tmp = tempfile.mkdtemp()
+        try:
+            base, ext = os.path.join(tmp, 'runs'), os.path.join(tmp, 'runs', 'ext')
+            os.makedirs(ext)
+            for d, tag, n in ((base, 'base', 3), (ext, 'ext', 2)):
+                with open(os.path.join(d, 'office__chicago.jsonl'), 'w') as f:
+                    for i in range(n):
+                        f.write(json.dumps({'id': i, 'tag': tag}) + '\n')
+            recs = runs.load_sets([base, ext], 'office', 'chicago')
+            self.assertEqual(sorted((r['tag'], r['id']) for r in recs),
+                             [('base', 0), ('base', 1), ('base', 2), ('ext', 0), ('ext', 1)])
+        finally:
+            shutil.rmtree(tmp)
+
+
 if __name__ == '__main__':
     unittest.main()
