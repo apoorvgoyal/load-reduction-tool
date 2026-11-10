@@ -43,6 +43,13 @@ def _build(**over):
 
 
 class GeometryTests(unittest.TestCase):
+    def test_negligible_overhang_left_out(self):
+        # A projection factor of 1.75e-7 (a sampled case) made a zero-area
+        # overhang that EnergyPlus rejected; it must be left out.
+        for pf, n in ((1.75e-7, 0), (0.0, 0), (0.3, 1)):
+            _, text, _ = _build(overhang_pf=pf)
+            self.assertEqual(text.count('Shading:Overhang:Projection,') > 0, n > 0, pf)
+
     def test_floor_area_and_scale(self):
         for n in (1, 2, 3, 7):
             sc, _, model = _build(n_floors=n)

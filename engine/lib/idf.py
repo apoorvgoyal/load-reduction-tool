@@ -192,6 +192,9 @@ def _verts_fields(verts):
 
 
 TIMESTEPS_PER_HOUR = 6   # results.py averages peaks over one hour of these
+# Overhangs with a smaller projection factor are left out (sub-millimetre depth;
+# EnergyPlus rejects them as zero-area surfaces).
+OVERHANG_PF_MIN = 1e-3
 
 
 # ── Schedules ───────────────────────────────────────────────────────────────
@@ -463,7 +466,11 @@ def build(sc, ddy, stat, eplus_version='25.2', annual=False):
                             ('Building Surface Name', sname), ('Outside Boundary Condition Object', ''),
                             ('View Factor to Ground', 'autocalculate'), ('Frame and Divider Name', ''),
                             ('Multiplier', 1.0)] + _verts_fields(wverts))
-                        if sc['overhang_pf'] > 0:
+                        # Numeric guard, not a design value: a projection factor
+                        # this small gives a sub-millimetre overhang whose area
+                        # EnergyPlus reads as 0 (severe "illegal surface area",
+                        # then fatal). Its shading effect is nil, so skip it.
+                        if sc['overhang_pf'] >= OVERHANG_PF_MIN:
                             w.add('Shading:Overhang:Projection', [
                                 ('Name', wn + ' Overhang'), ('Window or Door Name', wn),
                                 ('Height above Window or Door', 0.0), ('Tilt Angle from Window/Door', 90.0),
