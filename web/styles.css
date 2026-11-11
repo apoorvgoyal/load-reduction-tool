@@ -709,6 +709,7 @@ details.adv2 .adv-body { padding: 0 0 14px; }
 .badge-src.stale { color: var(--heat-ink); background: var(--heat-tint); border-color: transparent; }
 .badge-src.sur { background: var(--cool-tint); border-color: transparent; }
 .badge-src.ep { color: var(--ok); background: var(--ok-tint); border-color: transparent; }
+.badge-src.ind { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
 .badge-src { border-radius: 999px; }
 .tot { font-size: 15px; color: var(--muted); } .tot b { color: var(--ink); }
 .btn.sm { min-height: 44px; padding: 0 14px; font-size: 14px; }

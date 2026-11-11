@@ -329,12 +329,13 @@
     }
     if (!m) return {source: 'none', reason: 'no-model'};
     // A model that missed the accuracy limit on its independent EnergyPlus test
-    // is not used: the page asks for an EnergyPlus run instead.
-    var failed = C.failedTest(m, sc.type);
-    if (failed) return {source: 'none', reason: 'failed-test', failed: failed};
+    // is still shown, labelled as indicative with its tested error, next to a
+    // one-click EnergyPlus confirmation.
+    var failed = C.failedTest(m, sc.type, sc);
     var r = C.surrogateResult(m, sc);
     if (r.incompatible) return {source: 'none', reason: 'incompatible'};
     if (r.fixedDiffs.length) return {source: 'none', reason: 'fixed', fixedDiffs: r.fixedDiffs};
+    if (failed) r.failed = failed;
     return r;
   }
 
@@ -344,7 +345,7 @@
     var cf = sc.cooling_sizing_factor, hf = sc.heating_sizing_factor;
     var c = g.cooling, h = g.heating;
     return {
-      source: result.source, gfa: sc.gfa_m2, result: result, cBlock: c, hBlock: h,
+      source: result.source, failed: result.failed || null, gfa: sc.gfa_m2, result: result, cBlock: c, hBlock: h,
       cKey: c && c.key, hKey: h && h.key,
       clg: c && c.total_w * cf, clgSens: c && c.sensible_w != null ? c.sensible_w * cf : null,
       clgLat: c && c.latent_w != null ? c.latent_w * cf : null,
@@ -478,7 +479,15 @@
   function sourceBadge(g) {
     if (!g) return '<span class="badge none">No result</span>';
     if (g.source === 'energyplus') return '<span class="badge ep">EnergyPlus run</span>';
-    return '<span class="badge sur">Surrogate estimate</span>';
+    return '<span class="badge sur">' + (g.failed ? srcText(g) : 'Surrogate estimate') + '</span>';
+  }
+
+  // Short source label: EnergyPlus, an instant estimate, or (model above the
+  // accuracy limit on its test) an indicative estimate with that tested error.
+  function srcText(g) {
+    if (!g) return 'Needs EnergyPlus';
+    if (g.source === 'energyplus') return 'EnergyPlus';
+    return g.failed ? 'Indicative estimate · ±' + fmt(Math.ceil(g.failed.worst), 0) + '%' : 'Instant estimate';
   }
 
   function deltaHtml(cur, base, unitFmt) {
@@ -529,6 +538,14 @@
 
   function surrogateNotes(res, g) {
     var h = '', ho = res.model.holdout;
+    if (res.failed) {
+      return '<div class="note warn">Indicative estimate. For ' + esc(D.archetypes.types[S.type].label) + ' in ' + esc(stationById(S.station).label) +
+        ' the trained model is less accurate than the ' + fmt(res.failed.limit, 0) + '% limit: tested against ' + res.failed.n +
+        ' fresh EnergyPlus runs, 95% of its peaks were within ' + fmt(res.failed.worst, 1) + '%. Good for comparing options; click <b>Confirm with EnergyPlus</b> for design numbers.</div>' +
+        (res.extrapolated.length ? '<div class="note warn">Outside the trained range: ' + res.extrapolated.map(function (x) {
+          return esc(FEATURE_LABELS[x.feature]) + ' ' + fmt(x.value, 2) + ' (trained ' + fmt(x.min, 2) + '–' + fmt(x.max, 2) + ')';
+        }).join('; ') + '.</div>' : '');
+    }
     h += '<div class="note info">Instant estimate from a model trained on ' + res.model.n + ' EnergyPlus runs' +
       (ho ? ' and tested against ' + ho.n + ' fresh runs: worst 95th-percentile error ' +
         fmt(ho.worst_governing_p95_pct != null ? ho.worst_governing_p95_pct : ho.worst_total_p95_pct, 1) + '% (limit ' + fmt(ho.threshold_pct, 1) + '%)' : '') +
@@ -764,7 +781,7 @@
       // take the larger of the two after every move, as the optimizer does.
       var outs = heating ? [out] : ['clg_db_' + S.coolPct + '|total_w_m2', 'clg_dp_' + S.coolPct + '|total_w_m2'].filter(function (k) { return m.outputs[k]; });
       var peakOf = function (sc) { var p = C.predict(m, sc).perM2; return Math.max.apply(null, outs.map(function (k) { return p[k]; })); };
-      var failed = C.failedTest(m, S.type);
+      var failed = C.failedTest(m, S.type, sc0);
       if (failed) {
         notes += '<div class="note warn">The model for this type and station missed the accuracy limit (' + fmt(failed.worst, 1) +
           '%), so these bars are indicative: the direction and ranking are a guide, the sizes are not. Run the exact sweep below for EnergyPlus figures.</div>';
@@ -1009,7 +1026,7 @@
       return {clg: Math.max(p[names[0]], p[names[1]]) * gfa * sc0.cooling_sizing_factor, htg: p[names[2]] * gfa * sc0.heating_sizing_factor};
     }
     var r = C.optimize(levers, evaluate, {clg: isNaN(tc) ? null : tc / 100, htg: isNaN(th) ? null : th / 100});
-    o.result = {hash: scenarioHash(sc0) + '|' + S.coolPct + '|' + S.heatPct, r: r, levers: levers, failed: C.failedTest(m, S.type)};
+    o.result = {hash: scenarioHash(sc0) + '|' + S.coolPct + '|' + S.heatPct, r: r, levers: levers, failed: C.failedTest(m, S.type, sc0)};
   }
 
   function optimizerCard(g) {
@@ -1886,7 +1903,7 @@
     var res = resultFor(sc, null);
     if (res.source === 'none') return {sc: sc, hash: hash, src: 'none', reason: res.reason};
     var g = governed(res, sc);
-    return {sc: sc, hash: hash, src: 'surrogate', clg: g.clg, htg: g.htg};
+    return {sc: sc, hash: hash, src: 'surrogate', clg: g.clg, htg: g.htg, g: g};
   }
   function campusCoincident(rows) {
     if (!rows.length || rows.some(function (r) { return r.src !== 'energyplus'; })) return null;
@@ -1960,7 +1977,7 @@
         '<td><input class="cp-in cp-num" type="number" min="1" step="1000" data-cb="gfa" data-i="' + i + '" value="' + conv(b.gfa_m2) + '" aria-label="Floor area"></td>' +
         '<td><input class="cp-in cp-fl" type="number" min="1" max="60" step="1" data-cb="floors" data-i="' + i + '" value="' + b.n_floors + '" aria-label="Floors"></td>' +
         (r.src === 'none' ? '<td class="num">—</td><td class="num">—</td><td class="cp-src">' + (r.reason === 'loading' ? 'Loading…' : 'Needs EnergyPlus') + '</td>' :
-          '<td class="num">' + fmt(capC(r.clg), dpc) + '</td><td class="num">' + fmt(capH(r.htg), 0) + '</td><td class="cp-src">' + (r.src === 'energyplus' ? 'EnergyPlus' : 'Instant estimate') + '</td>') +
+          '<td class="num">' + fmt(capC(r.clg), dpc) + '</td><td class="num">' + fmt(capH(r.htg), 0) + '</td><td class="cp-src">' + (r.src === 'energyplus' ? 'EnergyPlus' : srcText(r.g)) + '</td>') +
         '<td><button type="button" class="btn text" data-cp-del="' + i + '" aria-label="Remove ' + esc(b.name) + '">Remove</button></td></tr>';
     });
     var ok = rows.filter(function (r) { return r.src !== 'none'; }), sumC = 0, sumH = 0;
@@ -2213,7 +2230,7 @@
     gs.forEach(function (x, i) {
       var g = x.g, ep = g && g.source === 'energyplus';
       h += '<article class="card cmp-card"><div class="cmp-ch"><input class="cmp-name" id="cmp-name-' + i + '" value="' + esc(x.o.name) + '" maxlength="40" aria-label="Name of this option">' +
-        (g ? '<span class="badge-src ' + (ep ? 'ep' : 'sur') + '">' + (ep ? 'EnergyPlus' : 'Instant estimate') + '</span>' : '') + '</div>' +
+        (g ? '<span class="badge-src ' + (ep ? 'ep' : (g.failed ? 'ind' : 'sur')) + '">' + srcText(g) + '</span>' : '') + '</div>' +
         '<p class="cmp-ctx">' + esc(D.archetypes.types[x.o.type].label) + ' · ' + esc(stationById(x.o.station).label) + '</p>';
       if (!g) h += '<p class="sub">No instant estimate for this option. Open it and run a full simulation.</p>';
       else ['cooling', 'heating'].forEach(function (kind) {
@@ -2404,11 +2421,11 @@
     if (!ref && g && g.source === 'surrogate') { ref = typicalResult(); refName = 'typical'; }
     var m = SUR[modelKeyFor(S.type, S.station)], ho = m && m.holdout, engineOn = S.engine && S.engine.available, ep = g && g.source === 'energyplus';
     var h = '<div class="wrap rp"><div class="rp-head"><h2 class="rp-title">Results</h2>' +
-      (g ? '<span class="badge-src ' + (ep ? 'ep' : 'sur') + '">' + (ep ? 'Full simulation · EnergyPlus' : 'Instant estimate' +
+      (g ? '<span class="badge-src ' + (ep ? 'ep' : (g.failed ? 'ind' : 'sur')) + '">' + (ep ? 'Full simulation · EnergyPlus' : g.failed ? srcText(g) : 'Instant estimate' +
         (ho && ho.worst_governing_p95_pct != null ? ' · within ~' + fmt(Math.ceil(ho.worst_governing_p95_pct), 0) + '%' : '')) + '</span>' : '<span class="badge-src none">No instant estimate</span>') +
       '<span class="ws-sp"></span>' +
-      '<button type="button" class="btn" id="b-run"' + (engineOn && !S.running ? '' : ' disabled') + '>' +
-      (S.running ? esc(S.engineMsg || 'Running EnergyPlus…') : (ep ? 'Re-run full simulation' : 'Run full simulation · ~4 sec')) + '</button>' +
+      '<button type="button" class="btn' + (g && g.failed && !ep ? ' primary' : '') + '" id="b-run"' + (engineOn && !S.running ? '' : ' disabled') + '>' +
+      (S.running ? esc(S.engineMsg || 'Running EnergyPlus…') : (ep ? 'Re-run full simulation' : g && g.failed ? 'Confirm with EnergyPlus · ~4 sec' : 'Run full simulation · ~4 sec')) + '</button>' +
       (g ? peaksPinned(g, ref, refName) : '') + '</div>';
     if (!engineOn) h += '<p class="sub">' + esc((S.engine && S.engine.reason) || '') + '</p>';
     if (S.runError) h += '<div class="note bad">' + esc(S.runError) + '</div>';
@@ -2538,7 +2555,7 @@
       'h1{font-size:26px}h2{font-size:18px;margin-top:24px}.big{font-size:28px;font-weight:800}</style></head><body>' +
       '<h1>Peak heating and cooling: ' + esc(D.archetypes.types[S.type].label) + '</h1><p>' + esc(st.label) + ' (climate zone ' + esc(st.climate_zone_stat) + ') · ' +
       area(S.sc.gfa_m2) + ' on ' + fmt(S.sc.n_floors, 0) + ' floors · ' + new Date().toISOString().slice(0, 10) + '</p>' +
-      '<p><b>Source:</b> ' + (g.source === 'energyplus' ? 'Full simulation (EnergyPlus ' + esc((S.ep.run.engine || {}).version || '') + ')' : 'Instant estimate (model trained on EnergyPlus runs)') +
+      '<p><b>Source:</b> ' + (g.source === 'energyplus' ? 'Full simulation (EnergyPlus ' + esc((S.ep.run.engine || {}).version || '') + ')' : (g.failed ? 'Indicative estimate (model trained on EnergyPlus runs; tested error ' + fmt(g.failed.worst, 1) + '% at the 95th percentile, above the ' + fmt(g.failed.limit, 0) + '% limit)' : 'Instant estimate (model trained on EnergyPlus runs)')) +
       '. Design condition: cooling ' + S.coolPct + '%, heating ' + S.heatPct + '%. Validation-stage tool.</p>' +
       '<h2>Cooling</h2><p class="big">' + fmt(capC(g.clg), isIP() ? 1 : 0) + ' ' + uC() + '</p><p>Busiest moment: ' + esc(busyPhrase(g.cKey, g.time)) + '.</p>' + shares('cooling') +
       '<h2>Heating</h2><p class="big">' + fmt(capH(g.htg), 0) + ' ' + uH() + '</p><p>Busiest moment: ' + esc(busyPhrase(g.hKey, g.hTime)) + '.</p>' + shares('heating') +

@@ -237,10 +237,6 @@ class BreakdownParityTests(unittest.TestCase):
         self.assertEqual(order, [c for c, _ in results.COMPONENT_GROUPS])
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 @unittest.skipUnless(NODE, 'node not installed')
 class OptimizerTests(unittest.TestCase):
     """web/core.js optimize(): options agree with one-lever-at-a-time sensitivity."""
@@ -268,3 +264,25 @@ console.log(JSON.stringify({f:d(r.fewest),s:d(r.smallest),one:r.byCount[0].best.
         saves = [m[2] for m in out['s']]
         self.assertEqual(saves, sorted(saves, reverse=True))
         self.assertEqual(out['s'][0][0], 'a')
+
+
+@unittest.skipUnless(NODE, 'node not installed')
+class SplitCheckTests(unittest.TestCase):
+    def test_failed_test_uses_the_matching_domain(self):
+        model = {'type': 'office', 'base_floor_plate_max_m2': 5000,
+                 'holdout': {'passed': False, 'threshold_pct': 5, 'n': 101, 'worst_governing_p95_pct': 7,
+                             'domains': {'base': {'n': 51, 'worst_governing_p95_pct': 3.0, 'passed': True},
+                                         'extended': {'n': 50, 'worst_governing_p95_pct': 7.0, 'passed': False}}}}
+        cases = [{'gfa_m2': 20000, 'n_floors': 4},                            # ordinary: base test, passed
+                 {'gfa_m2': 20000, 'n_floors': 4, 'adiabatic_roof': True},    # adiabatic surface: extended
+                 {'gfa_m2': 32000, 'n_floors': 4}]                            # 8,000 m2 plate: extended
+        script = ("var C=require(%r);var m=%s;console.log(JSON.stringify(%s.map(function(sc){"
+                  "return C.failedTest(m,'office',sc);})));") % (os.path.join(TOOL, 'web', 'core.js'), json.dumps(model), json.dumps(cases))
+        out = json.loads(subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True).stdout)
+        self.assertIsNone(out[0])
+        self.assertEqual(out[1]['worst'], 7.0)
+        self.assertEqual(out[2]['n'], 50)
+
+
+if __name__ == '__main__':
+    unittest.main()

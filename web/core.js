@@ -206,9 +206,25 @@
   // Independent-test result that rules the model out for this building type:
   // null when the model passed (or has not been tested), else the failing record.
   // A shared (unified) model is judged on its result for this type.
-  function failedTest(model, type) {
+  // Inputs from the extended design space: an adiabatic surface, or a floor
+  // plate beyond what the base training runs covered.
+  function inExtendedSpace(model, sc) {
+    if (!sc) return false;
+    if (UNTRAINED_BOOLS.some(function (k) { return !!sc[k]; })) return true;
+    var maxPlate = model && model.base_floor_plate_max_m2;
+    return !!(maxPlate && sc.gfa_m2 / sc.n_floors > maxPlate * 1.0001);
+  }
+
+  // The failing test record for these inputs, or null when the model passed.
+  // With a split check (holdout.domains), ordinary inputs use the base test and
+  // extended-space inputs the extended test.
+  function failedTest(model, type, sc) {
     var ho = model && model.holdout;
     if (!ho) return null;
+    if (ho.domains && sc) {
+      var dom = inExtendedSpace(model, sc) && ho.domains.extended ? ho.domains.extended : ho.domains.base;
+      if (dom) return dom.passed ? null : {worst: dom.worst_governing_p95_pct, limit: ho.threshold_pct, n: dom.n};
+    }
     if (model.type === 'unified' && ho.per_type && ho.per_type[type]) {
       return ho.per_type[type].passed ? null : {worst: ho.per_type[type].worst_governing_p95_pct, limit: ho.threshold_pct, n: ho.n};
     }
