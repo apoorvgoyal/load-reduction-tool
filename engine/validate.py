@@ -308,8 +308,9 @@ def main(argv):
             if a.extended_n and not a.skip_run and t != 'unified':
                 ext_cases = batch.make_samples(t, station, a.extended_n, a.seed, extended=True)
                 ext_path, _ = ensure_runs(t, station, ext_cases, a.workers, exe, version, TEST_RUNS_EXT)
-            if os.path.exists(ext_path):
-                recs += runs.load([ext_path])
+            ext_recs = runs.load([ext_path]) if os.path.exists(ext_path) else []
+            base_recs = list(recs)
+            recs = recs + ext_recs
             if not recs:
                 per_type[t] = {'error': 'no test runs', 'passed': False}
                 continue
@@ -319,6 +320,16 @@ def main(argv):
                 per_type[t] = {'error': str(e), 'passed': False}
                 continue
             r['default_case'] = default_case_row(model, recs)
+            # Split check: ordinary inputs are judged on the base test runs, and
+            # inputs from the extended design space (adiabatic surfaces, larger
+            # floor plates) on the extended test runs, each on its own.
+            r['domains'] = {}
+            for dom, dr in (('base', base_recs), ('extended', ext_recs)):
+                if dr:
+                    ds = score(model, dr, a.threshold)
+                    r['domains'][dom] = {'n': ds['n_cases'], 'worst_governing_p95_pct': ds['worst_governing_p95_pct'], 'passed': ds['passed']}
+            if t != 'unified' and r['domains']:
+                r['passed'] = all(d['passed'] for d in r['domains'].values())
             per_type[t] = r
             all_recs += recs
         scored = {t: r for t, r in per_type.items() if 'error' not in r}
@@ -356,6 +367,9 @@ def main(argv):
                 'total_p95_pct': {k: v['p95_abs_pct'] for k, v in r['per_output'].items() if k.endswith('|total_w_m2')},
                 'per_type': {t: {'worst_governing_p95_pct': x.get('worst_governing_p95_pct'), 'passed': x.get('passed', False)}
                              for t, x in per_type.items()} if len(test_types) > 1 else None,
+                # Ordinary inputs ('base') and extended-design-space inputs, each
+                # with its own result; the page uses the one that matches.
+                'domains': r.get('domains') if len(test_types) == 1 else None,
             }
     if not a.no_write:
         write_report(results, os.path.join(REPORT_DIR, 'report.md'), os.path.join(REPORT_DIR, 'report.json'))

@@ -197,6 +197,9 @@ def fit_records(recs, k=5, min_samples=100, btype=None, only=None, mlp=True):
         'fixed_inputs': fixed,
         # On/off inputs that took both values in this model's training runs;
         # the page asks for EnergyPlus when another one is switched on.
+        # Inputs beyond this floor plate, or with an adiabatic surface, belong to
+        # the extended design space and are judged on its own test (validate.py).
+        'base_floor_plate_max_m2': cfg['sampled']['floor_plate_m2']['max'],
         'varied_flags': [f for f in ADIABATIC_FLAGS
                          if len({bool(r['scenario'].get(f)) for r in recs}) == 2],
         'cv_folds': k,
@@ -231,6 +234,10 @@ def _choose_form(recs, Xraw, mean, std, outs, oof, k, allow_mlp):
     q_gov = _governing_p95(_rows_to_preds(names, np.column_stack([oof[nm] for nm in names])), recs)
     if not allow_mlp or q_gov is None or q_gov <= MLP_TRY_ABOVE_PCT or not mlp_available():
         return 'quadratic', None, {'quadratic': q_gov}
+    # The networks predict the peaks only (block totals per design day): fitted
+    # on those alone they are clearly more accurate than spread over every
+    # output. Breakdowns (sensible, latent, components, ...) stay quadratic.
+    names = [nm for nm in names if nm.endswith('|total_w_m2')]
     Z = (Xraw - mean) / std
     Y = np.array([[r['targets'][nm] for nm in names] for r in recs], float)
     ym, ys = Y.mean(0), Y.std(0)
