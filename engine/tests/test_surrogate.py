@@ -68,6 +68,68 @@ class FitTests(unittest.TestCase):
                                     'eplus': 'synthetic', 'severe': 0}) + '\n')
         cls.model, _ = fit_surrogate.fit_file(cls.path, k=5, min_samples=50)
 
+    def test_smooth_target_stays_quadratic(self):
+        self.assertEqual(self.model['form'], 'quadratic')
+        self.assertNotIn('mlp', self.model)
+
+    def _with_random_mlp(self):
+        """The fitted model plus a small random network taking over one output."""
+        rng = random.Random(5)
+        d, hdn = len(self.model['feature_mean']), 6
+        layer = lambda i, o: [[rng.uniform(-1, 1) for _ in range(o)] for _ in range(i)]  # noqa: E731
+        m = json.loads(json.dumps(self.model))
+        m['mlp'] = {'names': ['clg_db_0.4|total_w_m2'], 'y_mean': [50.0], 'y_std': [10.0],
+                    'nets': [{'W': [layer(d, hdn), layer(hdn, hdn), layer(hdn, 1)],
+                              'b': [[rng.uniform(-1, 1) for _ in range(hdn)], [rng.uniform(-1, 1) for _ in range(hdn)], [0.3]]}
+                             for _ in range(2)]}
+        del m['outputs']['clg_db_0.4|total_w_m2']['coef']
+        return m
+
+    def test_mlp_python_matches_numpy(self):
+        import numpy as np
+        from lib import surrogate
+        m = self._with_random_mlp()
+        sc = _random_scenario(random.Random(2))
+        z = (np.array(features.features(sc)) - np.array(m['feature_mean'])) / np.array(m['feature_std'])
+        ref = fit_surrogate._mlp_apply(m['mlp']['nets'], z[None, :])[0][0] * 10.0 + 50.0
+        self.assertAlmostEqual(surrogate.evaluate(m, list(z))['clg_db_0.4|total_w_m2'], ref, places=9)
+        # The output it does not cover still comes from the quadratic.
+        self.assertIn('htg_99.6|total_w_m2', surrogate.evaluate(m, list(z)))
+
+    @unittest.skipUnless(NODE, 'node not installed')
+    def test_mlp_js_parity(self):
+        from lib import surrogate
+        m = self._with_random_mlp()
+        cases = [_random_scenario(random.Random(20 + i)) for i in range(4)]
+        script = ("var C=require(%r);var m=%s;console.log(JSON.stringify(%s.map(function(sc){"
+                  "return C.predict(m,sc).perM2;})));") % (os.path.join(TOOL, 'web', 'core.js'), json.dumps(m), json.dumps(cases))
+        js = json.loads(subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True).stdout)
+        for sc, j in zip(cases, js):
+            py, _ = surrogate.predict(m, sc)
+            for k in ('clg_db_0.4|total_w_m2', 'htg_99.6|total_w_m2'):
+                self.assertAlmostEqual(py[k], max(0.0, j[k]), places=6, msg=k)
+
+    def test_mlp_chosen_for_a_switch(self):
+        try:
+            import sklearn  # noqa: F401
+        except ImportError:
+            self.skipTest('scikit-learn not installed')
+        rng = random.Random(8)
+        scs = [_random_scenario(rng) for _ in range(400)]
+        xs = [features.features(sc) for sc in scs]
+        knee = sorted(x[9] for x in xs)[len(xs) // 2]
+        recs = []
+        for i, (sc, x) in enumerate(zip(scs, xs)):
+            # A hinge at the median outdoor-air rate, as dehumidification
+            # switching on: a quadratic cannot follow it.
+            y = 10 + 400 * max(0.0, x[9] - knee) + 2 * x[12]
+            recs.append({'id': i, 'scenario': sc, 'targets': {'clg_db_0.4|total_w_m2': y, 'clg_dp_0.4|total_w_m2': 0.8 * y,
+                                                              'htg_99.6|total_w_m2': 5.0 + x[12]}})
+        m, _ = fit_surrogate.fit_records(recs, k=3, min_samples=50)
+        g = m['cv_governing_p95_pct']
+        self.assertEqual(m['form'], 'mlp', g)
+        self.assertLess(g['mlp'], g['quadratic'])
+
     def test_recovers_quadratic(self):
         cv = self.model['outputs']['clg_db_0.4|total_w_m2']['cv']
         self.assertGreater(cv['r2'], 0.9999)

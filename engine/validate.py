@@ -158,10 +158,15 @@ def governing_errors(model, recs):
     A wrong prediction that flips which cooling day governs is caught here,
     because the model's own maximum is compared with EnergyPlus's maximum.
     Negligible peaks are judged against NEGLIGIBLE_FRACTION of the design load."""
+    return governing_from_predictions([surrogate.predict(model, r['scenario'])[0] for r in recs], recs)
+
+
+def governing_from_predictions(preds, recs):
+    """governing_errors for given per-record prediction dicts (also used by
+    fit_surrogate.py to compare model forms on out-of-fold predictions)."""
     out = {label: [] for label in GOVERNING}
     floored = {label: 0 for label in GOVERNING}
-    for r in recs:
-        pred, _ = surrogate.predict(model, r['scenario'])
+    for pred, r in zip(preds, recs):
         ref = NEGLIGIBLE_FRACTION * _design_load(r['targets'])
         for label, days in GOVERNING.items():
             keys = [d + '|total_w_m2' for d in days]

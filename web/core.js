@@ -81,7 +81,7 @@
     for (i = 0; i < (+sc.occ_hours); i++) occ[((+sc.occ_start_h) + i) % 24] = true;
     for (i = 0; i < 24; i++) if (occ[i]) { nOcc++; if (i >= 12 && i < 18) nPeak++; if (i < 6) nNight++; }
     return [ew, sc.wwr * ew, sc.wall_u * (1 - sc.wwr) * ew, sc.win_u * sc.wwr * ew, sc.roof_u / n * roofOn,
-      sc.slab_f_factor_w_mk * perim / gfa * slabOn, sc.infiltration_ach * h, aperture, aperture * sc.overhang_pf,
+      sc.slab_f_factor_w_mk * perim / gfa * slabOn, sc.infiltration_ach * h * (perim > 0 ? 1 : 0), aperture, aperture * sc.overhang_pf,
       oa, oa * (1 - sc.erv_sensible_eff), oa * (1 - sc.erv_latent_eff),
       sc.lpd_w_m2, sc.epd_w_m2, ppl, sc.t_cool_c, sc.t_heat_c, core,
       Math.cos(2 * th), Math.sin(2 * th), sc.aspect_ratio,
@@ -96,6 +96,38 @@
   }
 
   function dot(a, b) { var s = 0; for (var i = 0; i < a.length; i++) s += a[i] * b[i]; return s; }
+
+  // Neural-network outputs (engine/lib/surrogate.py _mlp): mean of an ensemble
+  // of ReLU networks on standardised features, scaled back per output.
+  function mlpOut(mlp, z) {
+    var acc = mlp.names.map(function () { return 0; }), out = {};
+    mlp.nets.forEach(function (net) {
+      var a = z.slice(), last = net.W.length - 1;
+      net.W.forEach(function (W, li) {
+        var nxt = net.b[li].slice(), i, j, row, ai;
+        for (i = 0; i < a.length; i++) {
+          ai = a[i]; if (!ai) continue; row = W[i];
+          for (j = 0; j < nxt.length; j++) nxt[j] += ai * row[j];
+        }
+        a = li === last ? nxt : nxt.map(function (v) { return v > 0 ? v : 0; });
+      });
+      for (var j = 0; j < a.length; j++) acc[j] += a[j];
+    });
+    mlp.names.forEach(function (nm, j) { out[nm] = acc[j] / mlp.nets.length * mlp.y_std[j] + mlp.y_mean[j]; });
+    return out;
+  }
+
+  // Raw outputs from standardised features: the network for the outputs it
+  // covers, quadratic coefficients for the rest (engine/lib/surrogate.py evaluate).
+  function evaluate(model, z, names) {
+    var out = model.mlp ? mlpOut(model.mlp, z) : {}, X = null;
+    (names || Object.keys(model.outputs)).forEach(function (n) {
+      if (n in out || !model.outputs[n]) return;
+      if (!X) X = expand(z);
+      out[n] = dot(model.outputs[n].coef, X);
+    });
+    return out;
+  }
 
   function sameValue(a, b) {
     if (a === null || a === undefined) return b === null || b === undefined;
@@ -127,15 +159,15 @@
     UNTRAINED_BOOLS.forEach(function (k) {
       if (sc[k] && (model.varied_flags || []).indexOf(k) < 0) fixedDiffs.push({input: k, trained: false, value: true});
     });
-    var X = expand(z), out = {};
-    Object.keys(model.outputs).forEach(function (name) { out[name] = dot(model.outputs[name].coef, X); });
+    var raw = evaluate(model, z), out = {};
+    Object.keys(model.outputs).forEach(function (name) { out[name] = raw[name]; });
     return {perM2: out, extrapolated: extrap, fixedDiffs: fixedDiffs};
   }
 
   // Evaluate one output directly from a feature vector (sensitivity sweeps).
   function predictFeatures(model, x, output) {
     var z = x.map(function (v, i) { return (v - model.feature_mean[i]) / model.feature_std[i]; });
-    return dot(model.outputs[output].coef, expand(z));
+    return evaluate(model, z, [output])[output];
   }
 
   // Convert surrogate per-m2 outputs into the common result shape.
@@ -203,8 +235,8 @@
   function predictSome(model, sc, names) {
     var x = features(sc).slice(0, model.feature_mean.length), z = [], i, out = {};
     for (i = 0; i < x.length; i++) z.push((x[i] - model.feature_mean[i]) / model.feature_std[i]);
-    var X = expand(z);
-    names.forEach(function (n) { out[n] = Math.max(0, dot(model.outputs[n].coef, X)); });
+    var raw = evaluate(model, z, names);
+    names.forEach(function (n) { out[n] = Math.max(0, raw[n]); });
     return out;
   }
 

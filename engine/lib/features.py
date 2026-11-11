@@ -89,7 +89,9 @@ def features(sc):
         sc['win_u'] * sc['wwr'] * ew,
         sc['roof_u'] / n * roof_on,
         sc['slab_f_factor_w_mk'] * perim / gfa * slab_on,
-        sc['infiltration_ach'] * h,
+        # lib/idf.py shares infiltration over the exposed walls only, so a
+        # building with every wall adiabatic has none.
+        sc['infiltration_ach'] * h * (1.0 if perim > 0 else 0.0),
         aperture, aperture * sc['overhang_pf'],
         oa, oa * (1 - sc['erv_sensible_eff']), oa * (1 - sc['erv_latent_eff']),
         sc['lpd_w_m2'], sc['epd_w_m2'], ppl,

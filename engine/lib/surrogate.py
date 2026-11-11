@@ -12,7 +12,7 @@ from . import features
 #   loads-surrogate.js                small index: which models exist + their summary
 #   surrogates/<type>__<station>.js   one file per model, loaded by the page on demand
 # so the page stays light with hundreds of models.
-INDEX_FIELDS = ('type', 'station', 'climate_zone', 'n_samples', 'eplus_versions', 'fitted_at', 'holdout')
+INDEX_FIELDS = ('type', 'station', 'climate_zone', 'n_samples', 'eplus_versions', 'fitted_at', 'form', 'holdout')
 
 
 def _model_dir(index_path):
@@ -46,8 +46,12 @@ def load_published(path):
 
 def _compact(model):
     """6 significant figures on coefficients: far below the fit error, ~40% smaller."""
+    g = lambda c: float('%.6g' % c)  # noqa: E731
     m = dict(model)
-    m['outputs'] = {k: dict(o, coef=[float('%.6g' % c) for c in o['coef']]) for k, o in model['outputs'].items()}
+    m['outputs'] = {k: dict(o, coef=[g(c) for c in o['coef']]) if 'coef' in o else o for k, o in model['outputs'].items()}
+    if model.get('mlp'):
+        m['mlp'] = dict(model['mlp'], nets=[{'W': [[[g(c) for c in row] for row in W] for W in net['W']],
+                                             'b': [[g(c) for c in b] for b in net['b']]} for net in model['mlp']['nets']])
     return m
 
 
@@ -75,6 +79,44 @@ def _expand(z):
     return out
 
 
+def _mlp(mlp, z):
+    """Neural-network outputs (engine/fit_surrogate.py fit_mlp): the mean of an
+    ensemble of ReLU networks on standardised features, each output scaled back
+    by its training mean and standard deviation."""
+    acc = [0.0] * len(mlp['names'])
+    for net in mlp['nets']:
+        a = list(z)
+        last = len(net['W']) - 1
+        for li, (W, b) in enumerate(zip(net['W'], net['b'])):
+            nxt = list(b)
+            for i, ai in enumerate(a):
+                if ai:
+                    row = W[i]
+                    for j in range(len(nxt)):
+                        nxt[j] += ai * row[j]
+            a = nxt if li == last else [v if v > 0 else 0.0 for v in nxt]
+        for j, v in enumerate(a):
+            acc[j] += v
+    k = float(len(mlp['nets']))
+    return {nm: acc[j] / k * mlp['y_std'][j] + mlp['y_mean'][j] for j, nm in enumerate(mlp['names'])}
+
+
+def evaluate(model, z, names=None):
+    """Raw (unclamped) outputs from standardised features z: the network for
+    the outputs it covers, the quadratic coefficients for the rest."""
+    out = {}
+    if model.get('mlp'):
+        out.update(_mlp(model['mlp'], z))
+    X = None
+    for name, o in model['outputs'].items():
+        if name in out or (names is not None and name not in names):
+            continue
+        if X is None:
+            X = _expand(z)
+        out[name] = sum(c * xx for c, xx in zip(o['coef'], X))
+    return out
+
+
 def predict(model, sc):
     """Per-m2 outputs for a resolved scenario, with the page's clamps applied.
 
@@ -94,11 +136,11 @@ def predict(model, sc):
         tol = 1e-9 + 0.03 * abs(hi - lo)
         if v < lo - tol or v > hi + tol:
             extrap.append(features.FEATURES[i])
-    X = _expand(z)
     no_recovery = not (sc['erv_sensible_eff'] > 0) and not (sc['erv_latent_eff'] > 0)
     out = {}
-    for name, o in model['outputs'].items():
-        v = sum(c * xx for c, xx in zip(o['coef'], X))
+    for name, v in evaluate(model, z).items():
+        if name not in model['outputs']:
+            continue
         if not name.startswith('comp_'):
             v = max(0.0, v)       # loads can't be negative; components can
         if name.endswith('|hr_w_m2') and no_recovery:

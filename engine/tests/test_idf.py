@@ -195,6 +195,10 @@ class GeometryTests(unittest.TestCase):
             f = dict(zip(features.FEATURES, features.features(sc)))
             self.assertAlmostEqual(f['ext_wall_m2_per_m2'] * sc['gfa_m2'], model['totals']['ext_wall_m2'],
                                    delta=1e-6 * max(1.0, model['totals']['ext_wall_m2']), msg=str(over))
+            # Infiltration feature (ACH x height = m3/h per m2) against what the
+            # builder modelled, including none when every wall is adiabatic.
+            q = sum(z['infiltration_m3s'] * z['scale'] for z in model['zones']) * 3600 / sc['gfa_m2']
+            self.assertAlmostEqual(f['infiltration_m3h_per_m2'], q, delta=1e-6 * max(1.0, q), msg=str(over))
 
     def test_all_design_days_present(self):
         _, text, model = _build()
