@@ -333,7 +333,7 @@
     var engineOk = window.EPBrowser && window.EPBrowser.supported();
     var h = '<div class="card-head"><h2>Life-cycle cost' + (years ? ' over ' + nf(years) + ' years' : '') + '</h2><span class="hint">Against typical as the base case</span></div>';
     if (have < scs.length) {
-      h += '<p class="hint">Energy cost needs a full-year EnergyPlus run for each option (' + (scs.length - have) + ' to run). It runs in this browser; each takes a few minutes.</p>' +
+      h += '<p class="hint">Energy cost needs a full-year EnergyPlus run for each option (' + (scs.length - have) + ' to run). It runs in this browser, usually under a minute per option.</p>' +
         (RUN_ERR ? '<p class="note bad">' + esc(RUN_ERR) + '</p>' : '') +
         '<div><button type="button" class="btn primary" id="b-yearly"' + (engineOk && !running ? '' : ' disabled') + '>' +
         (running ? esc(RUN_MSG || 'Running yearly energy…') : 'Run yearly energy for ' + (scs.length - have === 1 ? 'one option' : (scs.length - have) + ' options')) + '</button></div>' +
