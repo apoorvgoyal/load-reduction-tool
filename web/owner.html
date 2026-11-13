@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Peak Load Tool · Owner view</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Open+Sans:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="owner.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="owner.html">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" fill="#15202B"/><path d="M9 22V12l7-4 7 4v10" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="M13 22v-5h6v5" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>
+    <span class="brand-title">Peak Load Tool</span><span class="brand-sub">for building owners</span>
+  </a>
+  <div class="top-right">
+    <div class="seg" role="group" aria-label="Units"><button type="button" id="u-ip" aria-pressed="true">IP</button><button type="button" id="u-si" aria-pressed="false">SI</button></div>
+    <a class="btn ghost" href="index.html#workspace">Detailed tool</a>
+  </div>
+</header>
+
+<p class="mock-banner" role="note"><b>Mockup for discussion.</b> Numbers are live from the tool's models, but the option packages are built from the tool's preset steps and are not yet cited packages.</p>
+
+<main class="wrap">
+  <section class="intro">
+    <h1>Size the heating and cooling for your building, and see what better design saves</h1>
+    <p class="lead">Answer four questions. Compare design options side by side: equipment size, equipment cost from your own rates, and how sure each number is.</p>
+  </section>
+
+  <div class="grid">
+    <aside class="side" aria-label="Your building and options">
+      <section class="card">
+        <h2><span class="n">1</span>Your building</h2>
+        <label class="fld"><span>Building type</span><select id="f-type"></select></label>
+        <label class="fld"><span>Location</span><select id="f-station"></select></label>
+        <div class="row2">
+          <label class="fld"><span>Floor area</span><span class="in"><input id="f-area" type="number" min="0" inputmode="decimal"><span class="sfx" id="f-area-u">ft²</span></span></label>
+          <label class="fld"><span>Floors</span><span class="in"><input id="f-floors" type="number" min="1" step="1" inputmode="numeric"></span></label>
+        </div>
+        <p class="hint" id="f-note"></p>
+      </section>
+
+      <section class="card">
+        <h2><span class="n">2</span>Options to compare</h2>
+        <p class="hint">Pick up to three. Each option is a bundle of design changes from typical.</p>
+        <div id="pkgs" class="pkgs"></div>
+      </section>
+
+      <section class="card">
+        <h2><span class="n">3</span>Your rates <span class="optl">optional</span></h2>
+        <p class="hint">The tool has no built-in prices. Add your installed-cost rates to see equipment cost.</p>
+        <label class="fld"><span>Cooling plant</span><span class="in"><span class="pfx">$</span><input id="r-clg" type="number" min="0" step="10" inputmode="decimal"><span class="sfx" id="r-clg-u">per ton</span></span></label>
+        <label class="fld"><span>Heating plant</span><span class="in"><span class="pfx">$</span><input id="r-htg" type="number" min="0" step="10" inputmode="decimal"><span class="sfx" id="r-htg-u">per MBH</span></span></label>
+        <label class="fld"><span>Heat pump efficiency at design (COP), if all-electric</span><span class="in"><input id="r-cop" type="number" min="0.5" step="0.1" inputmode="decimal"><span class="sfx">COP</span></span></label>
+      </section>
+    </aside>
+
+    <section class="results" aria-live="polite">
+      <div id="headline" class="headline"></div>
+      <div id="opts" class="opts"></div>
+      <section class="card" id="levers-card">
+        <div class="card-head"><h2>What makes the biggest difference</h2><span class="hint" id="levers-sub"></span></div>
+        <div id="levers"></div>
+      </section>
+      <section class="card next">
+        <h2>Coming next in the owner version</h2>
+        <ul class="next-list">
+          <li><b>Yearly energy cost and carbon</b> for each option, from a full-year EnergyPlus run with your energy prices and carbon factors.</li>
+          <li><b>One-page summary</b> to take into a budget or design meeting.</li>
+          <li><b>Cited packages</b> (for example code minimum and a high-performance guide) in place of the preset steps.</li>
+        </ul>
+      </section>
+    </section>
+  </div>
+  <p class="foot">Peak loads come from models trained on EnergyPlus runs for each building type and city, and tested on runs they never saw. Validation stage: use for early design decisions, not final equipment sizing. Heating peaks are checked against hand calculations; cooling peaks are not yet checked against an independent reference.</p>
+</main>
+
+<script src="data/loads-data.js"></script>
+<script src="data/loads-surrogate.js" onerror="window.LOADS_SURROGATE=null"></script>
+<script src="data/presets.js"></script>
+<script src="core.js"></script>
+<script src="owner.js"></script>
+</body>
+</html>
