@@ -55,11 +55,18 @@
         <label class="fld"><span>Heating plant</span><span class="in"><span class="pfx">$</span><input id="r-htg" type="number" min="0" step="10" inputmode="decimal"><span class="sfx" id="r-htg-u">per MBH</span></span></label>
         <label class="fld"><span>Heat pump efficiency at design (COP), if all-electric</span><span class="in"><input id="r-cop" type="number" min="0.5" step="0.1" inputmode="decimal"><span class="sfx">COP</span></span></label>
       </section>
+
+      <section class="card" id="lcc-in">
+        <h2><span class="n">4</span>Life-cycle cost <span class="optl">optional</span></h2>
+        <p class="hint">Your own figures; nothing is filled in for you. Constant dollars: give the discount rate and energy escalation above inflation.</p>
+        <div id="lcc-fields"></div>
+      </section>
     </aside>
 
     <section class="results" aria-live="polite">
       <div id="headline" class="headline"></div>
       <div id="opts" class="opts"></div>
+      <section class="card" id="lcc-card"></section>
       <section class="card" id="levers-card">
         <div class="card-head"><h2>What makes the biggest difference</h2><span class="hint" id="levers-sub"></span></div>
         <div id="levers"></div>
@@ -67,7 +74,7 @@
       <section class="card next">
         <h2>Coming next in the owner version</h2>
         <ul class="next-list">
-          <li><b>Yearly energy cost and carbon</b> for each option, from a full-year EnergyPlus run with your energy prices and carbon factors.</li>
+          <li><b>Carbon</b> for each option from the same yearly runs, with your emission factors and an optional carbon price.</li>
           <li><b>One-page summary</b> to take into a budget or design meeting.</li>
           <li><b>Cited packages</b> (for example code minimum and a high-performance guide) in place of the preset steps.</li>
         </ul>
@@ -81,6 +88,8 @@
 <script src="data/loads-surrogate.js" onerror="window.LOADS_SURROGATE=null"></script>
 <script src="data/presets.js"></script>
 <script src="core.js"></script>
+<script src="ep-browser.js"></script>
+<script src="owner-lcc.js"></script>
 <script src="owner.js"></script>
 </body>
 </html>

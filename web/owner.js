@@ -54,7 +54,7 @@
   }
 
   // ── State ───────────────────────────────────────────────────────────────
-  var S = {openPkg: null, type: 'office', station: 'chicago', gfa: null, floors: null, ip: true, picked: ['typical', 'envelope', 'high'],
+  var S = {lcc: {}, runs: {}, openPkg: null, type: 'office', station: 'chicago', gfa: null, floors: null, ip: true, picked: ['typical', 'envelope', 'high'],
     rates: {clg: '', htg: '', cop: ''}};
   try { var saved = JSON.parse(localStorage.getItem(STORE) || 'null'); if (saved) Object.keys(S).forEach(function (k) { if (saved[k] != null) S[k] = saved[k]; }); } catch (e) { /* no storage */ }
   function save() { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) { /* no storage */ } }
@@ -105,7 +105,11 @@
     if (!rc && !rh) return null;
     return {clg: rc ? clgVal(p.clg_kw) * rc : null, htg: rh ? htgVal(p.htg_kw) * rh : null};
   }
-  function money(v) { return v == null ? '–' : '$' + (v >= 1e6 ? nf(v / 1e6, 2) + 'M' : nf(Math.round(v / 1000)) + 'k'); }
+  function money(v) {
+    if (v == null) return '–';
+    var s = v < 0 ? '−' : '', a = Math.abs(v);
+    return s + '$' + (a >= 1e6 ? nf(a / 1e6, 2) + 'M' : a >= 1e4 ? nf(a / 1000) + 'k' : nf(a));
+  }
   function pctChange(v, ref) { return ref ? (v / ref - 1) * 100 : 0; }
   function chg(v, ref) {
     var c = pctChange(v, ref);
@@ -199,7 +203,202 @@
         '<span class="lv-c">' + lbar(x.pc, 'cool') + '<b>' + delta(clgVal(x.dc), CU()) + '</b></span>' +
         '<span class="lv-c">' + lbar(x.ph, 'heat') + '<b>' + delta(htgVal(x.dh), HU()) + '</b></span></div>';
     }).join('');
+    renderLCC(m, base, typical, rows);
     save();
+  }
+
+
+  // ── Life-cycle cost ─────────────────────────────────────────────────────
+  // Inputs are stored in one unit (SI areas, $ per therm, W per L/s) and shown
+  // in the page's units. k: shown = stored x k in IP (SI when kSI is given).
+  var CFM_PER_LS = 2.118880;
+  var LF = [
+    {g: 'Study', k: 'years', label: 'Study period', u: 'years', step: 1},
+    {g: 'Study', k: 'disc', label: 'Discount rate (real)', u: '% per year', step: 0.1},
+    {g: 'Study', k: 'esc', label: 'Energy price escalation above inflation', u: '% per year', step: 0.1, blank0: true},
+    {g: 'Energy', k: 'pElec', label: 'Electricity price', u: '$ per kWh', step: 0.01},
+    {g: 'Energy', k: 'pGas', label: 'Gas price', u: '$ per therm', uSI: '$ per kWh', kSI: 1 / 29.3071, step: 0.01, gas: true},
+    {g: 'Energy', k: 'copClg', label: 'Cooling plant seasonal efficiency', u: 'COP', step: 0.1},
+    {g: 'Energy', k: 'heatSrc', label: 'Heating source', select: [['gas', 'Gas boiler'], ['heatpump', 'Heat pump'], ['electric', 'Electric resistance']]},
+    {g: 'Energy', k: 'heatEff', label: 'Heating seasonal efficiency', u: 'fraction or COP', step: 0.01, noElec: true},
+    {g: 'Energy', k: 'sfp', label: 'Fan power', u: 'W per cfm', uSI: 'W per L/s', kIP: 1 / CFM_PER_LS, step: 0.01},
+    {g: 'Costs of the changes', k: 'cWall', m: 'wall', label: 'Better wall insulation', u: '$ per ft² of wall', uSI: '$ per m² of wall', area: 'wall'},
+    {g: 'Costs of the changes', k: 'cRoof', m: 'roof', label: 'Better roof insulation', u: '$ per ft² of roof', uSI: '$ per m² of roof', area: 'roof'},
+    {g: 'Costs of the changes', k: 'cSolar', m: 'solar', label: 'Glass that lets in less sun heat', u: '$ per ft² of glass', uSI: '$ per m² of glass', area: 'glass'},
+    {g: 'Costs of the changes', k: 'cShade', m: 'shade', label: 'Window shading', u: '$ per ft² of glass', uSI: '$ per m² of glass', area: 'glass'},
+    {g: 'Costs of the changes', k: 'cTight', m: 'tight', label: 'Tighter envelope', u: '$ per ft² of facade', uSI: '$ per m² of facade', area: 'facade'},
+    {g: 'Costs of the changes', k: 'cHr', m: 'hr', label: 'Heat recovery', u: '$ total', lump: true},
+    {g: 'Costs of the changes', k: 'cHrHi', m: 'hr_hi', label: 'High-efficiency heat recovery', u: '$ total', lump: true},
+    {g: 'Costs of the changes', k: 'cLight', m: 'light', label: 'Efficient lighting', u: '$ per ft² of floor', uSI: '$ per m² of floor', area: 'floor'},
+    {g: 'Plant upkeep', k: 'maintPct', label: 'Maintenance', u: '% of plant cost per year', step: 0.1},
+    {g: 'Plant upkeep', k: 'life', label: 'Plant service life', u: 'years', step: 1}
+  ];
+  function lfK(f) {           // shown = stored x k
+    if (f.area) return S.ip ? 1 / C.FT2_PER_M2 : 1;
+    if (f.kIP) return S.ip ? f.kIP : 1;
+    if (f.kSI) return S.ip ? 1 : f.kSI;
+    return 1;
+  }
+  function lfU(f) { return !S.ip && f.uSI ? f.uSI : f.u; }
+  function L(k) { var v = parseFloat(S.lcc[k]); return isNaN(v) ? null : v; }
+  function heatSrc() { return S.lcc.heatSrc || 'gas'; }
+  // Areas the measure costs apply to, from the model's geometry (core.js features).
+  function areas(sc) {
+    var f = C.features(sc), gfa = sc.gfa_m2;
+    return {wall: (f[0] - f[1]) * gfa, glass: f[1] * gfa, facade: f[0] * gfa, roof: sc.adiabatic_roof ? 0 : gfa / sc.n_floors, floor: gfa};
+  }
+  function areaText(m2) { return S.ip ? nf(m2 * C.FT2_PER_M2) + ' ft²' : nf(m2) + ' m²'; }
+  function buildLccFields() {
+    var g = null, h = '';
+    LF.forEach(function (f) {
+      if (f.g !== g) { if (g) h += '</fieldset>'; g = f.g; h += '<fieldset class="lg"><legend>' + esc(g) + '</legend>'; }
+      if (f.select) {
+        h += '<label class="fld"><span>' + esc(f.label) + '</span><select id="l-' + f.k + '">' + f.select.map(function (o) {
+          return '<option value="' + o[0] + '"' + (heatSrc() === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select></label>';
+        return;
+      }
+      var v = L(f.k), shown = v == null ? '' : +(v * lfK(f)).toPrecision(6);
+      h += '<label class="fld' + (f.gas ? ' if-gas' : '') + (f.noElec ? ' if-eff' : '') + '"><span>' + esc(f.label) + '</span><span class="in">' +
+        (f.u.charAt(0) === '$' ? '<span class="pfx">$</span>' : '') + '<input id="l-' + f.k + '" data-l="' + f.k + '" type="number" min="0" step="' + (f.step || 'any') + '" inputmode="decimal" value="' + shown + '">' +
+        '<span class="sfx">' + esc(lfU(f).replace(/^\$ /, '')) + '</span></span>' + (f.area ? '<span class="qty" data-qty="' + f.area + '"></span>' : '') + '</label>';
+    });
+    document.getElementById('lcc-fields').innerHTML = h + '</fieldset>';
+    syncLccVisibility();
+  }
+  function syncLccVisibility() {
+    var src = heatSrc();
+    document.querySelectorAll('#lcc-fields .if-gas').forEach(function (el) { el.hidden = src !== 'gas'; });
+    document.querySelectorAll('#lcc-fields .if-eff').forEach(function (el) {
+      el.hidden = src === 'electric';
+      var s = el.querySelector('.sfx'); if (s) s.textContent = src === 'gas' ? 'fraction, e.g. boiler' : 'seasonal COP';
+    });
+  }
+  function runKey(sc) { var b = engineBody(sc); return JSON.stringify(b); }
+  function engineBody(sc) {
+    var out = {}; Object.keys(D.fields).forEach(function (k) { if (sc[k] !== undefined) out[k] = sc[k]; });
+    out.station = S.station; out.type = S.type; return out;
+  }
+  var RUNNING = {}, RUN_MSG = '', RUN_ERR = null;
+  function runYearly(scs) {
+    RUN_ERR = null;
+    scs.forEach(function (sc) {
+      var key = runKey(sc);
+      if (S.runs[key] || RUNNING[key]) return;
+      RUNNING[key] = true;
+      var body = engineBody(sc); body.annual = true;
+      window.EPBrowser.run(body, function (msg) { RUN_MSG = msg; render(); }).then(function (r) {
+        delete RUNNING[key];
+        if (!r.ok) RUN_ERR = 'A yearly run failed: ' + (r.error || 'unknown error');
+        else S.runs[key] = {annual: r.annual, seconds: r.engine && r.engine.run_seconds, weather: r.station && r.station.weather_file};
+        render();
+      }, function (e) { delete RUNNING[key]; RUN_ERR = 'EnergyPlus could not start in this browser: ' + e.message; render(); });
+    });
+    render();
+  }
+  function lineChart(series, years) {
+    var W = 640, H = 240, l = 64, r = 16, tp = 14, b = 34, all = [0];
+    series.forEach(function (s) { all = all.concat(s.values); });
+    var mn = Math.min.apply(null, all), mx = Math.max.apply(null, all), span = (mx - mn) || 1;
+    var step = Math.pow(10, Math.floor(Math.log(span / 4) / Math.LN10)), nice = [1, 2, 2.5, 5, 10], tick = step;
+    for (var i = 0; i < nice.length; i++) { tick = nice[i] * step; if (span / tick <= 5) break; }
+    var y0 = Math.floor(mn / tick) * tick, y1 = Math.ceil(mx / tick) * tick;
+    var X = function (t) { return l + t / years * (W - l - r); }, Y = function (v) { return tp + (1 - (v - y0) / (y1 - y0 || 1)) * (H - tp - b); };
+    var o = '';
+    for (var v = y0; v <= y1 + tick / 2; v += tick) {
+      o += '<line x1="' + l + '" x2="' + (W - r) + '" y1="' + Y(v).toFixed(1) + '" y2="' + Y(v).toFixed(1) + '" class="' + (Math.abs(v) < tick / 2 ? 'zero' : 'grid') + '"/>' +
+        '<text x="' + (l - 6) + '" y="' + (Y(v) + 4).toFixed(1) + '" text-anchor="end">' + money(v) + '</text>';
+    }
+    var xt = years <= 10 ? 1 : years <= 30 ? 5 : 10;
+    for (var t = 0; t <= years; t += xt) o += '<text x="' + X(t).toFixed(1) + '" y="' + (H - b + 16) + '" text-anchor="middle">' + t + '</text>';
+    o += '<text x="' + ((l + W - r) / 2) + '" y="' + (H - 4) + '" text-anchor="middle">years</text>';
+    series.forEach(function (s) {
+      o += '<polyline fill="none" stroke="' + s.color + '" stroke-width="2.5" stroke-linejoin="round" points="' +
+        s.values.map(function (v, t) { return X(t).toFixed(1) + ',' + Y(v).toFixed(1); }).join(' ') + '"/>';
+      var e = s.values.length - 1;
+      o += '<circle cx="' + X(e).toFixed(1) + '" cy="' + Y(s.values[e]).toFixed(1) + '" r="4" fill="' + s.color + '"/>';
+    });
+    return '<div class="lchart"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Cumulative discounted savings against typical">' + o + '</svg></div>' +
+      '<div class="legend">' + series.map(function (s) { return '<span><i style="background:' + s.color + '"></i>' + esc(s.name) + '</span>'; }).join('') + '</div>';
+  }
+  var LINE_COLORS = ['#1D5FB4', '#08534A', '#7A3FB4'];
+  function renderLCC(m, base, typical, rows) {
+    var card = document.getElementById('lcc-card');
+    document.querySelectorAll('#lcc-fields [data-qty]').forEach(function (el) {
+      el.textContent = '× ' + areaText(areas(base)[el.getAttribute('data-qty')]);
+    });
+    var years = L('years'), disc = L('disc');
+    var opts = [{pkg: PACKAGES[0], p: typical}].concat(rows.filter(function (r) { return r.pkg.id !== 'typical'; }).map(function (r) { return {pkg: r.pkg, p: r}; }));
+    var scs = opts.map(function (o) { return o.p.sc; });
+    var have = scs.filter(function (sc) { return S.runs[runKey(sc)]; }).length, running = scs.some(function (sc) { return RUNNING[runKey(sc)]; });
+    var engineOk = window.EPBrowser && window.EPBrowser.supported();
+    var h = '<div class="card-head"><h2>Life-cycle cost' + (years ? ' over ' + nf(years) + ' years' : '') + '</h2><span class="hint">Against typical as the base case</span></div>';
+    if (have < scs.length) {
+      h += '<p class="hint">Energy cost needs a full-year EnergyPlus run for each option (' + (scs.length - have) + ' to run). It runs in this browser; each takes a few minutes.</p>' +
+        (RUN_ERR ? '<p class="note bad">' + esc(RUN_ERR) + '</p>' : '') +
+        '<div><button type="button" class="btn primary" id="b-yearly"' + (engineOk && !running ? '' : ' disabled') + '>' +
+        (running ? esc(RUN_MSG || 'Running yearly energy…') : 'Run yearly energy for ' + (scs.length - have === 1 ? 'one option' : (scs.length - have) + ' options')) + '</button></div>' +
+        (engineOk ? '' : '<p class="hint">EnergyPlus cannot run in this browser.</p>');
+      card.innerHTML = h; return;
+    }
+    if (!(years > 0) || disc == null) { card.innerHTML = h + '<p class="hint">Enter a study period and a discount rate under <b>4 Life-cycle cost</b>.</p>'; return; }
+    var e = {copClg: L('copClg'), heatSrc: heatSrc(), heatEff: L('heatEff'), sfp: L('sfp')};
+    var prm = {years: Math.round(years), disc: disc / 100, esc: (L('esc') || 0) / 100, life: L('life') || 0};
+    var A = areas(base), missingAll = [];
+    var res = opts.map(function (o) {
+      var run = S.runs[runKey(o.p.sc)], y = OwnerLCC.yearlyEnergy(run.annual, e), missing = y.missing.slice();
+      var pe = L('pElec'), pg = L('pGas');
+      if (pe == null) missing.push('electricity price');
+      if (y.therms > 0 && pg == null) missing.push('gas price');
+      var energyCost = (y.elec_kwh == null || pe == null || (y.therms > 0 && pg == null)) ? null : y.elec_kwh * pe + (y.therms || 0) * (pg || 0);
+      var c = cost(o.p), eq = c && c.clg != null && c.htg != null ? c.clg + c.htg : null;
+      if (eq == null) missing.push('plant rates (section 3)');
+      var meas = 0;
+      o.pkg.m.forEach(function (id) {
+        var f = LF.filter(function (x) { return x.m === id; })[0], v = L(f.k);
+        if (v == null) { missing.push('cost of ' + MEASURES[id].name.toLowerCase()); meas = null; return; }
+        if (meas != null) meas += f.lump ? v : v * A[f.area];
+      });
+      if (L('maintPct') == null) missing.push('maintenance');
+      var maint = eq != null && L('maintPct') != null ? eq * L('maintPct') / 100 : null;
+      missing.forEach(function (x) { if (missingAll.indexOf(x) < 0) missingAll.push(x); });
+      var ok = energyCost != null && eq != null && meas != null && maint != null;
+      return {o: o, y: y, energyCost: energyCost, eq: eq, meas: meas, maint: maint, ok: ok,
+        cf: ok ? OwnerLCC.cashFlows({first_equipment: eq, first_measures: meas, energy_cost: energyCost, maint: maint}, prm) : null};
+    });
+    var b0 = res[0];
+    res.forEach(function (r, i) { if (i && r.ok && b0.ok) r.cmp = OwnerLCC.compare(r.cf, b0.cf, r.energyCost + r.maint, b0.energyCost + b0.maint); });
+    var cols = res.map(function (r) { return '<th>' + esc(r.o.pkg.name) + (r.o.pkg.id === 'typical' ? '<span class="mut"> (base)</span>' : '') + '</th>'; }).join('');
+    function row(label, fn, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><th scope="row">' + label + '</th>' + res.map(function (r) { return '<td>' + fn(r) + '</td>'; }).join('') + '</tr>'; }
+    var M = function (v) { return v == null ? '<span class="mut">–</span>' : money(v); };
+    var t = '<div class="scroll-x"><table class="lt"><thead><tr><th></th>' + cols + '</tr></thead><tbody>' +
+      '<tr class="grp"><th colspan="' + (res.length + 1) + '">First cost</th></tr>' +
+      row('Heating and cooling plant', function (r) { return M(r.eq); }) +
+      row('Design changes', function (r) { return r.o.pkg.m.length ? M(r.meas) : money(0); }) +
+      '<tr class="grp"><th colspan="' + (res.length + 1) + '">First year</th></tr>' +
+      row('Electricity', function (r) { return r.y.elec_kwh == null ? '<span class="mut">–</span>' : nf(r.y.elec_kwh / 1000) + ' MWh'; }) +
+      (heatSrc() === 'gas' ? row('Gas', function (r) { return r.y.therms == null ? '<span class="mut">–</span>' : (S.ip ? nf(r.y.therms) + ' therms' : nf(r.y.therms * OwnerLCC.KWH_PER_THERM / 1000) + ' MWh'); }) : '') +
+      row('Energy cost', function (r) { return M(r.energyCost); }) +
+      row('Maintenance', function (r) { return M(r.maint); }) +
+      '<tr class="grp"><th colspan="' + (res.length + 1) + '">Present value over ' + nf(prm.years) + ' years</th></tr>' +
+      row('Energy', function (r) { return r.cf ? money(r.cf.pv.energy) : '<span class="mut">–</span>'; }) +
+      row('Maintenance', function (r) { return r.cf ? money(r.cf.pv.maint) : '<span class="mut">–</span>'; }) +
+      row('Plant replacement, less residual value', function (r) { return r.cf ? money(r.cf.pv.replace - r.cf.pv.residual) : '<span class="mut">–</span>'; }) +
+      row('<b>Life-cycle cost</b>', function (r) { return r.cf ? '<b>' + money(r.cf.pv.lcc) + '</b>' : '<span class="mut">–</span>'; }, 'tot') +
+      '<tr class="grp"><th colspan="' + (res.length + 1) + '">Against typical</th></tr>' +
+      row('Net savings', function (r) { return r.cmp ? '<b class="' + (r.cmp.net_savings >= 0 ? 'pos' : 'neg') + '">' + (r.cmp.net_savings < 0 ? '−' : '') + money(Math.abs(r.cmp.net_savings)) + '</b>' : '<span class="mut">–</span>'; }) +
+      row('Extra first cost', function (r) { return r.cmp ? (r.cmp.d_first < 0 ? '−' : '') + money(Math.abs(r.cmp.d_first)) : '<span class="mut">–</span>'; }) +
+      row('Savings-to-investment ratio', function (r) { return r.cmp ? (r.cmp.sir == null ? (r.cmp.d_first <= 0 ? 'no extra cost' : '–') : nf(r.cmp.sir, 2)) : '<span class="mut">–</span>'; }) +
+      row('Simple payback', function (r) { return r.cmp ? (r.cmp.simple_payback == null ? 'never' : r.cmp.simple_payback === 0 ? 'immediate' : nf(r.cmp.simple_payback, 1) + ' years') : '<span class="mut">–</span>'; }) +
+      row('Discounted payback', function (r) { return r.cmp ? (r.cmp.discounted_payback == null ? 'not within ' + prm.years + ' years' : r.cmp.discounted_payback === 0 ? 'immediate' : 'year ' + r.cmp.discounted_payback) : '<span class="mut">–</span>'; }) +
+      '</tbody></table></div>';
+    h += t;
+    if (missingAll.length) h += '<p class="note">To complete the table, add: ' + esc(missingAll.join(', ')) + '.</p>';
+    var series = res.filter(function (r) { return r.cmp; }).map(function (r, i) { return {name: r.o.pkg.name, values: r.cmp.cumulative, color: LINE_COLORS[i % 3]}; });
+    if (series.length) h += '<h3 class="sub-h">Cumulative savings against typical (discounted)</h3><p class="hint">Below zero the option has cost more so far; where a line crosses zero it has paid back.</p>' + lineChart(series, prm.years);
+    var r0 = S.runs[runKey(scs[0])];
+    h += '<p class="hint">Yearly energy: EnergyPlus on ' + esc((r0 && r0.weather) || 'typical-year weather') + '. Heating, cooling, fans, lighting and equipment; not hot water or process loads. ' +
+      'The design changes are assumed to last the study period; the plant is replaced at the end of its service life and its remaining value is credited at the end.</p>';
+    card.innerHTML = h;
   }
 
   // ── Inputs ──────────────────────────────────────────────────────────────
@@ -237,8 +436,23 @@
     if (rate('clg')) S.rates.clg = String(+(ip ? S.rates.clg * kc : S.rates.clg / kc).toFixed(0));
     if (rate('htg')) S.rates.htg = String(+(ip ? S.rates.htg * kh : S.rates.htg / kh).toFixed(1));
     document.getElementById('r-clg').value = S.rates.clg; document.getElementById('r-htg').value = S.rates.htg;
-    S.ip = ip; render();
+    S.ip = ip; buildLccFields(); render();
   }
+  buildLccFields();
+  document.getElementById('lcc-fields').addEventListener('input', function (e) {
+    var k = e.target.getAttribute('data-l'); if (!k) return;
+    var f = LF.filter(function (x) { return x.k === k; })[0], v = parseFloat(e.target.value);
+    S.lcc[k] = isNaN(v) ? '' : v / lfK(f); render();
+  });
+  document.getElementById('lcc-fields').addEventListener('change', function (e) {
+    if (e.target.id === 'l-heatSrc') { S.lcc.heatSrc = e.target.value; syncLccVisibility(); render(); }
+  });
+  document.getElementById('lcc-card').addEventListener('click', function (e) {
+    if (e.target.id !== 'b-yearly') return;
+    var base = baseScenario(), m = model(); if (!m) return;
+    var scs = [PACKAGES[0]].concat(S.picked.filter(function (id) { return id !== 'typical'; }).map(pkgById)).map(function (pkg) { return evalPackage(m, base, pkg).sc; });
+    runYearly(scs);
+  });
   document.getElementById('u-ip').addEventListener('click', function () { setUnits(true); });
   document.getElementById('u-si').addEventListener('click', function () { setUnits(false); });
   render();
