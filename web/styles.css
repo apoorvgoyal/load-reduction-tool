@@ -939,9 +939,22 @@ body[data-view="compare"] > .top, body[data-view="campus"] > .top { display: non
 .rk-x:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 .rk-hidden { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 .rk-hidden .linklike { font-size: 13px; text-decoration: underline; padding: 0; min-height: 0; }
-/* Adiabatic surfaces: six toggles, three per row */
-.adia { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; background: var(--grey); border-radius: var(--radius-control, 4px); padding: 4px; }
-.adia .sq { min-height: 40px; }
+/* Adiabatic toggles under the wall, roof and ground-floor questions */
+.adia-tg { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; }
+.adia-tg.walls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.tg { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-control, 4px);
+  background: var(--surface); color: var(--ink); font: 500 14px/1.2 var(--font); cursor: pointer; text-align: left; }
+.tg:hover { border-color: var(--border-strong); }
+.tg:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.tg-track { flex: none; position: relative; width: 32px; height: 18px; border-radius: 9px; background: var(--border-strong); transition: background .15s; }
+.tg-knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.tg.on .tg-track { background: var(--accent); }
+.tg.on .tg-knob { transform: translateX(14px); }
+.tg-txt { display: flex; flex-direction: column; min-width: 0; }
+.tg-s { font-size: 12px; font-weight: 400; color: var(--muted); }
+.tg.on .tg-s { color: var(--accent); }
+.tg-note { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .tg-track, .tg-knob { transition: none; } }
 /* Workspace header: keep one row at desktop widths */
 @media (min-width: 901px) {
   .ws-head { gap: 8px 10px; }

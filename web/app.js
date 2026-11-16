@@ -1583,14 +1583,14 @@
       {k: 'n_floors', label: 'Number of floors', tech: 'Floors above grade', fx: 'both', kind: 'number'},
       {k: 'aspect_ratio', label: 'Floor plan shape', tech: 'Plan aspect ratio (length ÷ width)', fx: 'both'},
       {k: 'north_axis_deg', label: 'Which way the long sides face', tech: 'Rotation of the long axis from east', fx: 'cool'}]},
-    {id: 'envelope', title: 'Walls & windows', desc: 'How much glass there is, and how well walls, roof and windows keep heat and sun out.', qs: [
-      {k: 'adiabatic', kind: 'adiabatic', label: 'Surfaces shared with conditioned space', tech: 'Adiabatic surfaces (party walls, a floor of a larger building)', fx: 'both'},
+    {id: 'envelope', title: 'Walls, roof, floor & windows', desc: 'Which surfaces face outdoors, how well they keep heat in, and how much sun the windows let in.', qs: [
+      {k: 'wall_u', label: 'Walls', tech: 'Wall U-factor (assembly)', fx: 'both', adia: ['adiabatic_wall_n', 'adiabatic_wall_e', 'adiabatic_wall_s', 'adiabatic_wall_w']},
+      {k: 'roof_u', label: 'Roof', tech: 'Roof U-factor (assembly)', fx: 'both', adia: ['adiabatic_roof']},
+      {k: 'slab_f_factor_w_mk', label: 'Ground floor', tech: 'Slab-on-grade F-factor (edge heat loss)', fx: 'heat', kind: 'number', adia: ['adiabatic_floor']},
       {k: 'wwr', label: 'How much of the wall is glass', tech: 'Window-to-wall ratio', fx: 'both', sketch: true},
       {k: 'win_u', label: 'How well the windows keep heat in', tech: 'Window U-factor (assembly)', fx: 'both'},
       {k: 'shgc', label: 'How much sun heat the windows let in', tech: 'Solar heat gain coefficient (SHGC)', fx: 'cool'},
-      {k: 'overhang_pf', label: 'Shading over the windows', tech: 'Overhang projection factor', fx: 'cool'},
-      {k: 'wall_u', label: 'Wall insulation', tech: 'Wall U-factor (assembly)', fx: 'both'},
-      {k: 'roof_u', label: 'Roof insulation', tech: 'Roof U-factor (assembly)', fx: 'both'}]},
+      {k: 'overhang_pf', label: 'Shading over the windows', tech: 'Overhang projection factor', fx: 'cool'}]},
     {id: 'people', title: 'People & equipment', desc: 'Who and what is inside, giving off heat.', qs: [
       {k: 'm2_per_person', label: 'How busy the building is', tech: 'Floor area per person', fx: 'both'},
       {k: 'lpd_w_m2', label: 'Lighting', tech: 'Lighting power density', fx: 'cool'},
@@ -1713,11 +1713,15 @@
     return h;
   }
   function questionHtml(q) {
-    if (q.kind === 'adiabatic') return adiabaticHtml(q);
     var k = q.k, spec = fieldSpec(k), unit = spec[2], v = S.sc[k];
     var vb = S.verify[k] ? ' <span class="verify" title="Default not yet checked against its cited source">verify</span>' : '';
     var h = '<div class="qq" id="q-' + k + '"><div class="qq-head"><div class="qq-t"><span class="qq-label" id="ql-' + k + '">' + esc(q.label) + '</span>' +
       '<span class="qq-tech">' + esc(q.tech) + vb + '</span></div><div class="fxs">' + fxIcons(q.fx) + '</div></div>';
+    if (q.adia) {
+      h += adiaToggles(q);
+      // Every surface of this kind is adiabatic: its insulation is not used.
+      if (q.adia.every(function (a) { return S.sc[a]; })) return h + '</div>';
+    }
     if (q.sketch) h += '<div class="sketch" id="wwr-sketch">' + wwrSketch() + '</div>';
     if (q.kind === 'number') return h + numBox(k, q.label) + '</div>';
     var ps = presetsFor(k), sel = null;
@@ -1763,7 +1767,7 @@
     if (sec.id === 'cost') return ratesAdded() ? {t: 'Rates added', ch: true} : {t: 'Optional', ch: false};
     if (sec.id === 'system') return sysOn() ? {t: 'Added', ch: true} : {t: 'Optional', ch: false};
     var keys = [];
-    sectionQs(sec).forEach(function (q) { if (q.kind === 'adiabatic') ADIA.forEach(function (a) { keys.push(a[0]); }); else keys.push(q.k); });
+    sectionQs(sec).forEach(function (q) { keys.push(q.k); (q.adia || []).forEach(function (a) { keys.push(a); }); });
     var n = changedCount(keys);
     return {t: n ? n + (n === 1 ? ' change' : ' changes') : 'Typical', ch: n > 0};
   }
@@ -2098,18 +2102,28 @@
     var m = SUR[modelKeyFor(S.type, S.station)], v = (m && m.varied_flags) || [];
     return on.every(function (a) { return v.indexOf(a[0]) >= 0; });
   }
-  function adiabaticHtml(q) {
-    var on = ADIA.filter(function (a) { return S.sc[a[0]]; });
-    var h = '<div class="qq" id="q-adiabatic"><div class="qq-head"><div class="qq-t"><span class="qq-label" id="ql-adiabatic">' + esc(q.label) + '</span>' +
-      '<span class="qq-tech">' + esc(q.tech) + '</span></div><div class="fxs">' + fxIcons('both') + '</div></div>' +
-      '<div class="adia" role="group" aria-labelledby="ql-adiabatic">' + ADIA.map(function (a) {
-        var v = !!S.sc[a[0]];
-        return '<button type="button" class="sq' + (v ? ' on' : '') + '" aria-pressed="' + v + '" data-adia="' + a[0] + '">' + esc(a[1]) + '</button>';
-      }).join('') + '</div>';
-    h += '<p class="sq-desc">' + (on.length ? '<b>Adiabatic:</b> ' + on.map(function (a) { return esc(a[1].toLowerCase()); }).join(', ') +
-      '. No heat flows through them; adiabatic walls have no windows or air leaks.' + (adiaTrained(on) ? '' : ' The instant estimate for this building type and location is not trained for this yet: run a full simulation.') :
-      '<b>All exposed</b> · a stand-alone building. Select the surfaces next to conditioned space (a neighbour, the floor above or below).') + '</p>';
-    return h + '</div>';
+  // Per-surface toggles under the wall, roof and ground-floor questions:
+  // exposed to outdoors, or shared with conditioned space (adiabatic).
+  function adiaToggles(q) {
+    var names = {}; ADIA.forEach(function (a) { names[a[0]] = a[1]; });
+    var on = ADIA.filter(function (a) { return q.adia.indexOf(a[0]) >= 0 && S.sc[a[0]]; });
+    var walls = q.adia.length > 1;
+    var h = '<div class="adia-tg' + (walls ? ' walls' : '') + '" role="group" aria-label="' + esc(q.label) + ': exposed or adiabatic">' + q.adia.map(function (k) {
+      var v = !!S.sc[k];
+      return '<button type="button" role="switch" class="tg' + (v ? ' on' : '') + '" aria-checked="' + v + '" data-adia="' + k + '">' +
+        '<span class="tg-track" aria-hidden="true"><span class="tg-knob"></span></span><span class="tg-txt"><span class="tg-l">' +
+        esc(walls ? names[k] : 'Adiabatic') + '</span>' + (walls ? '<span class="tg-s">' + (v ? 'Adiabatic' : 'Exposed') + '</span>' : '') + '</span></button>';
+    }).join('') + '</div>';
+    var all = on.length === q.adia.length, msg;
+    if (walls) msg = !on.length ? 'Switch on any wall shared with a conditioned neighbour (a party wall).' :
+      (all ? 'All walls are adiabatic: no wall or window heat flow, no air leaks, so wall insulation is not used.' :
+        'Adiabatic walls pass no heat and have no windows or air leaks.');
+    else if (q.adia[0] === 'adiabatic_roof') msg = all ? 'Shared with conditioned space above (e.g. more floors of a larger building): no heat flows through it, so roof insulation is not used.' :
+      'Switch on if conditioned space sits above (e.g. more floors of a larger building).';
+    else msg = all ? 'Over conditioned space (e.g. floors below in a larger building): no heat flows through it, so the slab value is not used.' :
+      'Switch on if conditioned space sits below (e.g. floors below in a larger building).';
+    h += '<p class="tg-note">' + esc(msg) + (on.length && !adiaTrained(on) ? ' <b>The instant estimate for this building type and location is not trained for this yet: run a full simulation.</b>' : '') + '</p>';
+    return h;
   }
 
   // ── Compare: up to three saved options side by side ─────────────────
@@ -2193,12 +2207,12 @@
     var asked = {};
     SECTIONS.forEach(function (sec) {
       rows += group(sec.title, sec.qs.map(function (q) {
-        if (q.kind === 'adiabatic') return line('Adiabatic surfaces', opts.map(function (o) {
-          var on = ADIA.filter(function (a) { return o.sc[a[0]]; }).map(function (a) { return a[1].toLowerCase(); });
-          return on.length ? on.join(', ') : 'none';
-        }));
         asked[q.k] = true;
-        return line(q.label, opts.map(function (o) { return o.sc[q.k] == null ? '–' : presetValue(q.k, o.sc[q.k]); }), q.tech);
+        var adia = !q.adia ? '' : line(q.label + ': adiabatic', opts.map(function (o) {
+          var on = ADIA.filter(function (a) { return q.adia.indexOf(a[0]) >= 0 && o.sc[a[0]]; }).map(function (a) { return a[1].toLowerCase(); });
+          return on.length ? (q.adia.length > 1 ? on.join(', ') : 'yes') : 'no';
+        }));
+        return adia + line(q.label, opts.map(function (o) { return o.sc[q.k] == null ? '–' : presetValue(q.k, o.sc[q.k]); }), q.tech);
       }).join(''));
     });
     var adv = '';
