@@ -33,7 +33,7 @@ It is independent of the Total Carbon Tool: its own server, its own page, no sha
 | Use for | Numbers that go into a basis of design | Exploring options, ranking strategies |
 | Shown as | Green **EnergyPlus run** badge, with component breakdown, zone sizing, IDF download | Blue **Surrogate estimate** badge, with its out-of-sample error (95th percentile) |
 
-The surrogate is only used when it passed its independent test against fresh EnergyPlus runs (see "Automatic testing against EnergyPlus"). Where a building type × station model missed the limit, the page shows no estimate and asks for an EnergyPlus run, giving the model's tested error. It is also only used when the scenario is inside what it was trained on. If any input it held fixed during training has changed (for example supply air temperature or occupied hours), the page asks for an EnergyPlus run. If a varied input is outside its trained range, the page shows an extrapolation warning.
+Every surrogate is tested against fresh EnergyPlus runs it never saw (see "Automatic testing against EnergyPlus"). Where a building type × station model passed, its estimate is shown as the surrogate result with its error. Where it missed the limit, the estimate is shown as **Indicative estimate ± X%** with the model's tested error, and the page offers an EnergyPlus run. The surrogate is only used when the scenario is inside what it was trained on. If any input it held fixed during training has changed (for example supply air temperature or occupied hours), the page asks for an EnergyPlus run. If a varied input is outside its trained range, the page shows an extrapolation warning.
 
 ## What the page shows
 
@@ -110,7 +110,8 @@ python3 engine/validate.py --types office --stations chicago            # indepe
 - `--types all --stations all` covers every building type and station.
 - `engine/variables.json` defines the sampled design space. Ranges given as `scale_of_default` or `offset_of_default` are relative to each building type's defaults, so every type's defaults sit inside its trained range.
 - Each sample is one EnergyPlus run, and every run simulates all eight design days.
-- The fit is a quadratic ridge regression on 21 physics-shaped features (`engine/lib/features.py`). Ridge strength is chosen by 5-fold cross-validation; the error statistics stored with each model are out-of-fold.
+- The fit uses 26 physics-shaped features (`engine/lib/features.py`). Each model is a quadratic ridge regression (ridge strength by 5-fold cross-validation) or, where the quadratic's out-of-fold error is above 3%, also a small neural-network ensemble (5 networks of 64×64, `MLP_*` in `engine/fit_surrogate.py`); the form with the lower out-of-fold error on the reported peaks is published. The error statistics stored with each model are out-of-fold.
+- The neural-network form needs `scikit-learn` (`pip install scikit-learn`); without it every model is fitted quadratic. The page itself needs neither: the networks are published as plain weights and evaluated in JavaScript.
 - **More data helps:** on 500 real office/Chicago runs, held-out P95 cooling error fell from 32% (100 runs) to 3% (400 runs) and was still falling.
 - Failed runs go to `engine/runs/*.failed.jsonl`. Samples with severe EnergyPlus errors are counted in the model metadata, with their first messages kept.
 - Published models are a small index (`web/data/loads-surrogate.js`) plus one file per model (`web/data/surrogates/<type>__<station>.js`, about 160 kB). The page loads only the model it needs.
@@ -226,44 +227,48 @@ Envelope defaults by climate zone were carried over from the Total Carbon Tool a
 
 ## Surrogate test results
 
-Each building type × station model was tested by `engine/validate.py` against 51 EnergyPlus runs it never saw (independent sample, seed 9001, plus the type default). Peaks are one-hour averages. A model passes when the worst 95th-percentile error on the peaks the page reports is at most 5%. Models that fail are **not used by the page**; it asks for an EnergyPlus run instead.
+Each building type × station model was tested by `engine/validate.py` against 101 EnergyPlus runs it never saw (seed 9001): 51 with ordinary inputs (an independent sample plus the type default) and 50 from the extended design space (adiabatic surfaces, floor plates up to 10,000 m²). Peaks are one-hour averages. A model passes when the worst 95th-percentile error on the peaks the page reports is at most 5%, judged separately on the ordinary and the extended test runs (split check): both must pass.
 
-Training: 500 EnergyPlus runs per model, 1,500 for the 40 models that were still improving at 500 (EnergyPlus 25.2.0). Results from 2026-10-23.
+Models that fail are still shown, labelled **Indicative estimate ± X%** with their tested error, and the page offers an EnergyPlus run for the exact building.
 
-**194 of 243 models pass.** Cells show the worst P95 error on the reported peaks; failures in bold.
+Training (EnergyPlus 25.2.0, results from 2026-11-16):
+- 1,000 to 5,500 runs per model: 500 or more with ordinary inputs (seed 1) plus 500 or more from the extended design space (seed 2). Models that were still improving got more runs.
+- Form per model, chosen by 5-fold out-of-fold error on the training runs only: quadratic ridge regression (147 models) or a small neural-network ensemble (96 models).
+
+**221 of 243 models pass.** Cells show the worst P95 error on the reported peaks across all 101 test runs; failures in bold. † marks a model under 5% overall that missed the limit on one of the two test sets.
 
 | Station | higher ed | office | hotel | retail | healthcare | school | lab | stadium | sports |
 |---|---|---|---|---|---|---|---|---|---|
-| Albuquerque | 5.0 | 4.8 | 4.5 | 4.1 | **5.9** | **9.7** | **16.0** | **10.7** | **6.3** |
-| Atlanta | 2.0 | 2.0 | 2.1 | 2.3 | 1.4 | 1.6 | 1.7 | 2.9 | 2.7 |
-| Boston | 2.4 | 2.9 | 3.4 | 3.0 | 2.5 | 2.2 | 2.8 | 3.1 | 4.4 |
-| Buffalo | 3.7 | 3.5 | 2.7 | 3.6 | 3.0 | 2.9 | 1.2 | 4.1 | **5.6** |
-| Chicago | 1.9 | 3.1 | 2.4 | 2.7 | 2.8 | 2.7 | 0.9 | 3.2 | 3.1 |
-| Dallas-Fort Worth | 1.8 | 2.5 | 2.8 | 1.9 | 2.1 | 2.0 | 0.8 | 3.1 | 2.1 |
-| Denver | 3.8 | 4.9 | 4.3 | **5.3** | **8.8** | **7.8** | **13.7** | **11.8** | **5.9** |
-| El Paso | 2.3 | 2.6 | 2.9 | 4.3 | 4.4 | 2.9 | 4.2 | **7.4** | **12.2** |
-| Fairbanks | 3.4 | 4.8 | 2.9 | 3.5 | 4.5 | 4.5 | **10.4** | **5.7** | **6.6** |
-| Great Falls | 3.6 | 3.8 | 4.4 | 3.9 | 4.9 | **5.6** | **10.0** | 3.9 | **6.1** |
-| Honolulu | 2.9 | 3.8 | 4.3 | 3.6 | 2.4 | 2.7 | 3.5 | **8.7** | **6.1** |
-| Houston | 2.2 | 2.3 | 2.8 | 2.4 | 1.3 | 1.6 | 1.2 | 2.2 | 1.8 |
-| International Falls | 2.6 | 4.3 | 4.4 | 4.4 | 4.6 | 3.5 | **6.8** | **8.9** | **8.5** |
-| Kansas City | 2.2 | 2.8 | 2.6 | 2.5 | 1.8 | 2.7 | 1.8 | 3.0 | 2.3 |
-| Los Angeles | 3.4 | 4.3 | 3.9 | 3.6 | **8.0** | **10.4** | **11.7** | **23.6** | **22.3** |
-| Miami | 1.7 | 2.5 | 2.5 | 2.4 | 2.3 | 1.3 | 2.6 | 2.8 | 2.7 |
-| New York | 2.3 | 4.7 | 2.3 | 3.7 | 2.1 | 3.2 | 2.7 | 3.4 | 3.1 |
-| Phoenix | 2.0 | 2.3 | 2.0 | 1.6 | 1.5 | 2.0 | 2.3 | 3.9 | 1.8 |
-| Port Angeles | 3.9 | 3.7 | **6.3** | **6.2** | **6.5** | 4.7 | **12.0** | **17.1** | **50.3** |
-| Rochester | 3.2 | 3.0 | 4.2 | 4.7 | 3.4 | 2.0 | 1.6 | 4.7 | 4.2 |
-| San Diego | 2.1 | 3.7 | 2.7 | 3.7 | 3.0 | 2.4 | **5.6** | **12.6** | **13.2** |
-| San Francisco | 4.8 | 4.6 | 4.5 | **6.2** | **16.0** | **10.2** | **20.2** | **14.3** | **15.1** |
-| Seattle | 3.5 | 4.5 | 4.1 | 3.5 | 4.1 | 4.9 | **10.4** | **5.8** | **7.4** |
-| St. Louis | 2.4 | 2.3 | 2.1 | 3.0 | 1.4 | 1.8 | 2.4 | 2.5 | 2.2 |
-| Tampa | 2.3 | 2.9 | 2.1 | 1.7 | 1.9 | 2.0 | 1.9 | 2.1 | 1.9 |
-| Tucson | 2.8 | 3.2 | 3.6 | 3.4 | 2.6 | 3.4 | 1.5 | 5.0 | **7.2** |
-| Washington | 1.9 | 2.1 | 3.9 | 2.3 | 1.9 | 2.7 | 1.2 | 3.2 | 2.7 |
-| **Passing** | 27/27 | 27/27 | 26/27 | 24/27 | 22/27 | 22/27 | 17/27 | 16/27 | 13/27 |
+| Albuquerque | 2.3 | 3.3 | 2.6 | 3.1 | 2.2 | 4.6 | **14.2** | 3.4 | 3.8 |
+| Atlanta | 1.9 | 2.4 | 2.5 | 2.5 | 1.8 | 1.4 | 1.2 | 2.7 | 2.9 |
+| Boston | 2.3 | 3.2 | 3.7 | 3.1 | 1.7 | 2.0 | 2.3 | 2.5 | 2.9 |
+| Buffalo | 4.4 | 3.3 | 2.2 | 3.6 | 2.7 | 3.1 | 1.5 | 3.9 | 3.4 |
+| Chicago | 2.6 | 3.8 | 3.4 | 3.2 | 2.5 | 2.4 | 1.4 | 3.3 | 3.1 |
+| Dallas-Fort Worth | 1.1 | 2.8 | 2.4 | 2.1 | 1.9 | 1.9 | 1.0 | 2.7 | 2.7 |
+| Denver | 3.8 | **5.1** | 3.7 | 3.0 | 2.8 | 3.1 | 2.3 | 3.8 | **4.7**† |
+| El Paso | 2.7 | 2.4 | 3.2 | 4.5 | 2.1 | 2.9 | 3.3 | **4.9**† | **4.2**† |
+| Fairbanks | 4.2 | 3.4 | 3.4 | 2.8 | 2.4 | 3.3 | 2.2 | 3.6 | **5.3** |
+| Great Falls | 2.5 | 2.8 | 3.3 | 3.2 | 2.5 | 3.0 | 2.3 | 3.5 | 3.0 |
+| Honolulu | 2.3 | 3.3 | 4.1 | 3.6 | 2.1 | 2.0 | 2.5 | 1.9 | 2.1 |
+| Houston | 2.3 | 2.6 | 2.5 | 1.9 | 1.5 | 1.7 | 0.9 | 1.4 | 2.2 |
+| International Falls | 3.2 | 4.2 | 2.9 | 3.7 | 2.0 | 3.1 | 1.1 | 2.5 | **4.5**† |
+| Kansas City | 1.5 | 3.4 | 2.6 | 2.2 | 2.3 | 2.4 | 1.5 | 3.3 | 2.2 |
+| Los Angeles | 3.3 | 4.6 | 2.7 | 3.6 | 3.4 | 4.8 | 2.1 | **6.4** | **12.4** |
+| Miami | 2.2 | 2.1 | 2.7 | 2.7 | 2.1 | 2.1 | 2.5 | 2.7 | 2.0 |
+| New York | 2.3 | 3.9 | 3.1 | 2.5 | 1.8 | 2.5 | 2.3 | 2.8 | 2.3 |
+| Phoenix | 2.7 | 2.3 | 2.3 | 2.4 | 1.9 | 2.5 | 1.5 | 4.6 | 2.3 |
+| Port Angeles | 4.5 | 3.9 | **6.6** | **6.5** | **4.1**† | **6.3** | **5.5** | **7.5** | **16.9** |
+| Rochester | 2.9 | 2.0 | 4.0 | 3.1 | 3.4 | 3.4 | 1.4 | 4.1 | 2.9 |
+| San Diego | 2.4 | 2.9 | 3.2 | 3.2 | 4.1 | 2.9 | 2.5 | **4.2**† | **4.5**† |
+| San Francisco | 3.3 | 3.3 | 3.7 | **9.2** | 4.5 | 4.3 | 2.3 | 3.8 | **7.9** |
+| Seattle | 3.5 | 3.1 | **4.8**† | 3.4 | 2.1 | 4.4 | 2.0 | 2.5 | **5.8** |
+| St. Louis | 2.3 | 3.0 | 2.8 | 2.2 | 1.5 | 2.5 | 2.8 | 2.1 | 2.7 |
+| Tampa | 1.8 | 2.7 | 2.2 | 1.6 | 2.0 | 1.7 | 1.8 | 2.5 | 2.4 |
+| Tucson | 3.0 | 2.7 | 3.1 | 2.6 | 3.0 | 3.2 | 1.4 | 3.1 | 3.3 |
+| Washington | 1.9 | 2.3 | 3.6 | 2.0 | 1.9 | 3.0 | 1.0 | 2.6 | 3.8 |
+| **Passing** | 27/27 | 26/27 | 25/27 | 25/27 | 26/27 | 26/27 | 25/27 | 23/27 | 18/27 |
 
-**Where the surrogate is not used, and why.** Almost every failure is a cooling peak in a mild coastal, dry or very cold climate (San Francisco, Los Angeles, San Diego, Port Angeles, Seattle, Denver, Albuquerque, El Paso, Great Falls, Fairbanks, International Falls). There the outdoor air is a load in some designs and a free-cooling credit in others, cooling peaks are small, and heat recovery switches on and off across the design space. Checked and ruled out as causes: EnergyPlus noise (sweeps of every input are smooth after the one-hour averaging), the regression form (gradient-boosted trees, a neural network and a hybrid did no better), a log scale, separate sensible and latent fits, and an outdoor-air load/credit feature. For the worst cases more training runs stopped helping between 250 and 500 runs. EnergyPlus runs remain accurate there; only the instant estimate is withheld.
+**Where the instant estimate is indicative, and why.** Almost every failure is a cooling peak in a mild coastal, dry or very cold climate (Port Angeles, San Francisco, Los Angeles, San Diego, Seattle, Denver, El Paso, Fairbanks, International Falls, Albuquerque), mostly for sports, stadium and lab buildings. There the outdoor air is a load in some designs and a free-cooling credit in others, cooling peaks are small, and heat recovery switches on and off across the design space. Earlier checks at 500 runs per model ruled out EnergyPlus noise (sweeps of every input are smooth after the one-hour averaging), a log scale, separate sensible and latent fits, and an outdoor-air load/credit feature. More runs and the neural-network form brought most models under the limit (194 of 243 passed with 500 to 1,500 runs and quadratic fits only). EnergyPlus runs remain accurate in these climates; only the instant estimate carries the wider band.
 
 ## Validation plan
 
