@@ -15,6 +15,12 @@ from . import features
 INDEX_FIELDS = ('type', 'station', 'climate_zone', 'n_samples', 'eplus_versions', 'fitted_at', 'form', 'holdout')
 
 
+def eplus_versions(recs):
+    """Distinct EnergyPlus versions of a set of run records, without the build
+    date (`, YMD=...`), which differs between machines building the same release."""
+    return sorted(set((r.get('eplus') or '').split(', YMD=')[0] for r in recs))
+
+
 def _model_dir(index_path):
     return os.path.join(os.path.dirname(index_path), 'surrogates')
 

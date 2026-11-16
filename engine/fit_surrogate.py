@@ -187,7 +187,7 @@ def fit_records(recs, k=5, min_samples=100, btype=None, only=None, mlp=True):
         'type': 'unified' if unified else sc0['type'], 'station': sc0['station'],
         'components': components, 'climate_zone': sc0['climate_zone'],
         'n_samples': len(recs),
-        'eplus_versions': sorted(set(r.get('eplus') or '' for r in recs)),
+        'eplus_versions': surrogate.eplus_versions(recs),
         'samples_with_severe_errors': sum(1 for r in recs if r.get('severe')),
         'features': features.FEATURES,
         'feature_mean': [float(x) for x in mean],

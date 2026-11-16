@@ -351,7 +351,7 @@ def main(argv):
             'per_output': score(model, all_recs, a.threshold)['per_output'],
             'per_type': per_type,
         }
-        r['eplus_versions'] = sorted(set(x.get('eplus') or '' for x in all_recs))
+        r['eplus_versions'] = surrogate.eplus_versions(all_recs)
         results['models'][key] = r
         print('%s: %d test runs, worst P95 on reported peaks %.1f%% (%s) -> %s   [any single design day: %.1f%%]' % (
             key, r['n_cases'], r['worst_governing_p95_pct'], r['worst_governing_output'],
