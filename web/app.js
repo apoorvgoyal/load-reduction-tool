@@ -256,39 +256,177 @@
     S.sc.station = S.station;
   }
 
+  // Everything the page remembers between visits. The same object is the
+  // content of a project file (Project menu).
+  function snapshot() {
+    return {type: S.type, station: S.station, czOverride: S.czOverride,
+      coolPct: S.coolPct, heatPct: S.heatPct, sc: S.sc, baseline: S.baseline, tab: S.tab, bdMode: S.bdMode, units: S.units,
+      showSources: S.showSources, plant: S.plant, rates: S.rates, energy: S.energy, annual: S.annual, compare: S.compare, sys: S.sys, hiddenMeasures: S.hiddenMeasures, infFacade: S.infFacade,
+      campus: {station: S.campus.station, list: S.campus.list, ep: S.campus.ep}};
+  }
+
   function save() {
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify({type: S.type, station: S.station, czOverride: S.czOverride,
-        coolPct: S.coolPct, heatPct: S.heatPct, sc: S.sc, baseline: S.baseline, tab: S.tab, bdMode: S.bdMode, units: S.units,
-        showSources: S.showSources, plant: S.plant, rates: S.rates, energy: S.energy, annual: S.annual, compare: S.compare, sys: S.sys, hiddenMeasures: S.hiddenMeasures, infFacade: S.infFacade,
-        campus: {station: S.campus.station, list: S.campus.list, ep: S.campus.ep}}));
+      localStorage.setItem(STORE_KEY, JSON.stringify(snapshot()));
     } catch (e) { /* storage unavailable: state just isn't remembered */ }
   }
 
-  function restore() {
-    try {
-      var s = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
-      if (!s || !D.archetypes.types[s.type]) return false;
-      S.type = s.type; S.station = stationById(s.station).id; S.czOverride = s.czOverride || null;
-      S.coolPct = s.coolPct || '0.4'; S.heatPct = s.heatPct || '99.6';
-      S.units = s.units === 'si' ? 'si' : 'ip';
-      S.tab = s.tab === 'details' ? 'details' : 'summary'; S.bdMode = s.bdMode === 'pct' ? 'pct' : 'abs';
-      S.showSources = false;
-      if (s.plant) S.plant = s.plant;
-      if (s.rates) S.rates = {cooling: s.rates.cooling || {}, heating: s.rates.heating || {}};
-      if (s.energy) Object.keys(S.energy).forEach(function (k) { if (s.energy[k] !== undefined) S.energy[k] = s.energy[k]; });
-      S.annual = s.annual || null;
-      var d = C.defaults(D, S.type, s.sc.climate_zone);
-      S.prov = d.provenance; S.verify = d.verify; S.defaults = d.scenario;
-      S.sc = s.sc; S.baseline = s.baseline || null;
-      S.compare = Array.isArray(s.compare) ? s.compare.slice(0, CMP_MAX) : [];
-      S.hiddenMeasures = s.hiddenMeasures && typeof s.hiddenMeasures === 'object' ? s.hiddenMeasures : {};
-      S.infFacade = typeof s.infFacade === 'number' ? s.infFacade : null;
-      if (s.sys) ['vavMin', 'lossC', 'lossH'].forEach(function (k) { if (s.sys[k] != null) S.sys[k] = s.sys[k]; });
-      if (s.campus) { S.campus.station = s.campus.station || null; S.campus.list = s.campus.list || []; S.campus.ep = s.campus.ep || {}; }
-      return true;
-    } catch (e) { return false; }
+  function applyState(s) {
+    if (!s || !D.archetypes.types[s.type] || !s.sc || envZones().indexOf(s.sc.climate_zone) < 0) return false;
+    S.type = s.type; S.station = stationById(s.station).id; S.czOverride = envZones().indexOf(s.czOverride) >= 0 ? s.czOverride : null;
+    S.coolPct = ['0.4', '1', '2'].indexOf(s.coolPct) >= 0 ? s.coolPct : '0.4';
+    S.heatPct = ['99.6', '99'].indexOf(s.heatPct) >= 0 ? s.heatPct : '99.6';
+    S.units = s.units === 'si' ? 'si' : 'ip';
+    S.tab = s.tab === 'details' ? 'details' : 'summary'; S.bdMode = s.bdMode === 'pct' ? 'pct' : 'abs';
+    S.showSources = false;
+    if (s.plant) S.plant = s.plant;
+    if (s.rates) S.rates = {cooling: s.rates.cooling || {}, heating: s.rates.heating || {}};
+    if (s.energy) Object.keys(S.energy).forEach(function (k) { if (s.energy[k] !== undefined) S.energy[k] = s.energy[k]; });
+    S.annual = s.annual || null;
+    var d = C.defaults(D, S.type, s.sc.climate_zone);
+    S.prov = d.provenance; S.verify = d.verify; S.defaults = d.scenario;
+    S.sc = s.sc; S.baseline = s.baseline || null;
+    S.compare = Array.isArray(s.compare) ? s.compare.slice(0, CMP_MAX) : [];
+    S.hiddenMeasures = s.hiddenMeasures && typeof s.hiddenMeasures === 'object' ? s.hiddenMeasures : {};
+    S.infFacade = typeof s.infFacade === 'number' ? s.infFacade : null;
+    if (s.sys) ['vavMin', 'lossC', 'lossH'].forEach(function (k) { if (s.sys[k] != null) S.sys[k] = s.sys[k]; });
+    if (s.campus) { S.campus.station = s.campus.station || null; S.campus.list = s.campus.list || []; S.campus.ep = s.campus.ep || {}; }
+    return true;
   }
+
+  function restore() {
+    try { return applyState(JSON.parse(localStorage.getItem(STORE_KEY) || 'null')); } catch (e) { return false; }
+  }
+
+  // ── Project file ───────────────────────────────────────────────────────
+  // A project file holds the inputs and settings (the snapshot above), not
+  // simulation results: instant estimates come back at once, and EnergyPlus
+  // runs are repeated with one click. A file may come from anywhere, so every
+  // value is checked against what the page itself can produce before use.
+  var PROJECT_FORMAT = 'peak-load-tool.project', PROJECT_VERSION = 1;
+
+  function projectText() {
+    var st = JSON.parse(JSON.stringify(snapshot()));
+    st.annual = null; st.campus.ep = {};
+    if (st.baseline) st.baseline.ep = null;
+    st.compare.forEach(function (o) { o.ep = null; });
+    return JSON.stringify({format: PROJECT_FORMAT, version: PROJECT_VERSION, saved: new Date().toISOString(),
+      note: 'Peak Load Tool project: inputs and settings. Open it in the tool with Project, then Open a project file.', state: st}, null, 1);
+  }
+
+  function projectName() {
+    var t = (D.archetypes.types[S.type].label + ' ' + stationById(S.station).label).toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return 'peak-load-' + t + '-' + new Date().toISOString().slice(0, 10) + '.peakload.json';
+  }
+
+  function okNum(v) { return typeof v === 'number' && isFinite(v); }
+  function numText(v) {                    // an input box's value: a number, or '' when blank
+    if (okNum(v)) return v;
+    return typeof v === 'string' && v.trim() !== '' && isFinite(+v) ? v.trim() : '';
+  }
+  function okStation(id) { return D.stations.some(function (x) { return x.id === id; }); }
+
+  // A scenario from a file: only the fields and value types the page uses;
+  // anything missing takes the building type's default.
+  function cleanScenario(sc, type, station) {
+    if (!sc || typeof sc !== 'object' || Array.isArray(sc) || envZones().indexOf(sc.climate_zone) < 0) return null;
+    var d = C.defaults(D, type, sc.climate_zone).scenario, out = {};
+    Object.keys(sc).forEach(function (k) {
+      if (k === 'type' || k === 'climate_zone' || k === 'station') return;
+      var v = sc[k], t = typeof d[k];
+      if (okNum(v) ? (t === 'number' || t === 'object' || t === 'undefined')
+        : typeof v === 'boolean' ? (t === 'boolean' || t === 'undefined')
+        : v === null && t === 'object') out[k] = v;
+    });
+    Object.keys(d).forEach(function (k) { if (!(k in out)) out[k] = d[k]; });
+    out.type = type; out.climate_zone = sc.climate_zone; out.station = station;
+    return out;
+  }
+
+  function cleanProject(f) {
+    if (!f || f.format !== PROJECT_FORMAT || !f.state || typeof f.state !== 'object') throw new Error('This is not a Peak Load Tool project file.');
+    if (!(f.version <= PROJECT_VERSION)) throw new Error('This project was saved by a newer version of the tool. Open it there, or update this page.');
+    var s = f.state, type = s.type;
+    if (!D.archetypes.types[type]) throw new Error('The building type in this project is not in this version of the tool.');
+    if (!okStation(s.station)) throw new Error('The location in this project is not in this version of the tool.');
+    var sc = cleanScenario(s.sc, type, s.station);
+    if (!sc) throw new Error('The building inputs in this project could not be read.');
+    var plant = {}, rates = {cooling: {}, heating: {}};
+    ['cooling', 'heating'].forEach(function (k) {
+      plant[k] = s.plant && PLANTS[k].indexOf(s.plant[k]) >= 0 ? s.plant[k] : PLANTS[k][0];
+      var r = s.rates && s.rates[k];
+      if (r && typeof r === 'object') PLANTS[k].forEach(function (p) { var v = numText(r[p]); if (v !== '') rates[k][p] = v; });
+    });
+    var energy = {};
+    Object.keys(S.energy).forEach(function (k) {
+      var v = s.energy && s.energy[k];
+      energy[k] = k === 'heatSource' ? (['gas', 'electric', 'heatpump'].indexOf(v) >= 0 ? v : 'gas') : numText(v);
+    });
+    var sys = {};
+    ['vavMin', 'lossC', 'lossH'].forEach(function (k) { sys[k] = numText(s.sys && s.sys[k]); });
+    var hidden = {};
+    if (s.hiddenMeasures && typeof s.hiddenMeasures === 'object') Object.keys(s.hiddenMeasures).forEach(function (k) {
+      if (s.hiddenMeasures[k] === true && /^[\w.|-]{1,80}$/.test(k)) hidden[k] = true;
+    });
+    var compare = (Array.isArray(s.compare) ? s.compare : []).slice(0, CMP_MAX).map(function (o, i) {
+      if (!o || !D.archetypes.types[o.type] || !okStation(o.station)) return null;
+      var osc = cleanScenario(o.sc, o.type, o.station);
+      return osc && {name: String(o.name || 'Option ' + (i + 1)).slice(0, 40), type: o.type, station: o.station,
+        czOverride: envZones().indexOf(o.czOverride) >= 0 ? o.czOverride : null, sc: osc, ep: null};
+    }).filter(Boolean);
+    var bsc = s.baseline && cleanScenario(s.baseline.sc, type, s.station);
+    var cst = s.campus && okStation(s.campus.station) ? s.campus.station : null;
+    var list = (s.campus && Array.isArray(s.campus.list) ? s.campus.list : []).slice(0, 100).map(function (b, i) {
+      if (!b || !D.archetypes.types[b.type] || !(okNum(b.gfa_m2) && b.gfa_m2 > 0) || !(okNum(b.n_floors) && b.n_floors >= 1)) return null;
+      return {name: String(b.name || 'Building ' + (i + 1)).slice(0, 60), type: b.type, gfa_m2: b.gfa_m2, n_floors: Math.round(b.n_floors),
+        sc: b.sc && cst ? cleanScenario(b.sc, b.type, cst) : null};
+    }).filter(Boolean);
+    return {type: type, station: s.station, czOverride: s.czOverride, coolPct: s.coolPct, heatPct: s.heatPct, sc: sc,
+      baseline: bsc ? {sc: bsc, ep: null} : null, tab: s.tab, bdMode: s.bdMode, units: s.units, plant: plant, rates: rates,
+      energy: energy, annual: null, compare: compare, sys: sys, hiddenMeasures: hidden,
+      infFacade: okNum(s.infFacade) && s.infFacade >= 0 ? s.infFacade : null, campus: {station: cst, list: list, ep: {}}};
+  }
+
+  function openProject(file) {
+    if (!file) return;
+    if (file.size > 5e6) { projectMsg('That file is too large to be a project file.', true); return; }
+    var rd = new FileReader();
+    rd.onerror = function () { projectMsg('The file could not be read.', true); };
+    rd.onload = function () {
+      var st;
+      try { st = cleanProject(JSON.parse(rd.result)); } catch (e) {
+        projectMsg(e instanceof SyntaxError ? 'This is not a Peak Load Tool project file.' : e.message, true); return;
+      }
+      // Clear everything tied to the previous project before loading.
+      S.ep = null; S.epSens = null; S.epSensRunning = null; S.epSensError = null; S.runError = null; S.annualError = null;
+      S.custom = {}; S.rebuild = true; S.opt.result = null; S.campus.error = null;
+      applyState(st);
+      save();
+      projectMsg('Opened ' + file.name.slice(0, 80) + '. Inputs and settings are restored. EnergyPlus results are not kept in project files: run them again if you need them.', false);
+      if (location.hash === '#workspace') route(); else location.hash = '#workspace';
+    };
+    rd.readAsText(file);
+  }
+
+  // Short confirmation or error after saving or opening a project.
+  function projectMsg(text, isError) {
+    var el = document.getElementById('project-msg');
+    if (!el) return;
+    el.textContent = text; el.className = 'project-msg' + (isError ? ' err' : ''); el.hidden = false;
+    clearTimeout(projectMsg.t);
+    projectMsg.t = setTimeout(function () { el.hidden = true; }, isError ? 12000 : 8000);
+  }
+
+  // "Project" menu: save this project to a file, or open one saved earlier.
+  function projectButtons() {
+    return '<details class="proj-menu"><summary class="btn text">Project</summary><div class="proj-pop">' +
+      '<button type="button" class="proj-item" data-proj="save">Save project to a file</button>' +
+      '<label class="proj-item">Open a project file…' +
+      '<input type="file" data-proj="open" accept=".json,.peakload.json,application/json" class="sr-only"></label>' +
+      '<p class="proj-hint">Saves inputs, settings, compared options and campus buildings. EnergyPlus results are not saved.</p></div></details>';
+  }
+
 
   // ── Helpers ─────────────────────────────────────────────────────────────
   function fmt(v, d) {
@@ -474,7 +612,7 @@
       '<button type="button" data-units="ip" aria-pressed="' + isIP() + '"' + (isIP() ? ' class="on"' : '') + '>Imperial</button>' +
       '<button type="button" data-units="si" aria-pressed="' + !isIP() + '"' + (!isIP() ? ' class="on"' : '') + '>Metric</button></div>';
   }
-  function renderStatus() { document.getElementById('status').innerHTML = unitsToggle(); }
+  function renderStatus() { document.getElementById('status').innerHTML = projectButtons() + unitsToggle(); }
 
   function sourceBadge(g) {
     if (!g) return '<span class="badge none">No result</span>';
@@ -1799,7 +1937,7 @@
       '<a class="chg" href="#start">Change</a><a class="chg" href="#campus">Campus</a><span class="ws-sp"></span><div id="ws-units">' + unitsToggle() + '</div>' +
       '<button type="button" class="btn text" id="b-reset">Reset to typical</button><button type="button" class="btn secondary" id="b-base">Save as baseline</button>' +
       '<span id="ws-cmp" class="ws-cmp">' + cmpButtonsHtml() + '</span>' +
-      '<button type="button" class="btn" id="b-report">Download report</button></header>' +
+      projectButtons() + '<button type="button" class="btn" id="b-report">Download report</button></header>' +
       '<div class="ws-tabs" role="tablist" aria-label="Workspace"><button type="button" role="tab" data-wstab="inputs" aria-selected="' + (tab === 'inputs') + '">Inputs</button>' +
       '<button type="button" role="tab" data-wstab="results" aria-selected="' + (tab === 'results') + '" id="tab-results">' + esc(tabLabel()) + '</button></div>' +
       '<div class="ws-body"><section class="pane pane-in" id="pane-in" aria-label="Inputs">' + leftPane() + '</section>' +
@@ -2800,6 +2938,7 @@
     else if (t.getAttribute('data-cmp-del')) { S.compare.splice(+t.getAttribute('data-cmp-del'), 1); render(); }
     else if (t.id === 'b-cmp-clear') { S.compare = []; render(); }
     else if (t.id === 'b-cmp-all') { S.cmpAll = !S.cmpAll; render(); }
+    else if (t.getAttribute('data-proj') === 'save') { download(projectName(), projectText(), 'application/json'); projectMsg('Project saved to your downloads. To continue later, choose Project, then Open a project file.', false); }
     else if (t.id === 'b-report') { var rh = reportHtml(); if (rh) download('peak-load-report-' + S.type + '-' + S.station + '.html', rh, 'text/html'); }
     else if (t.id === 'b-dl-idf' && S.ep) download('peak-load-' + S.type + '-' + S.station + '.idf', S.ep.run.idf || '', 'text/plain');
     else if (t.id === 'b-dl-json' && S.ep) {
@@ -2818,7 +2957,13 @@
     : {available: false, reason: 'EnergyPlus runs in the browser and needs a current Chrome, Edge, Firefox or Safari.'};
   // Views are rebuilt on every route, so listen on the document.
   document.addEventListener('input', function (e) { onInput(e); onOptInput(e); });
-  document.addEventListener('change', function (e) { onChange(e); onOptInput(e); });
+  document.addEventListener('change', function (e) {
+    if (e.target.getAttribute && e.target.getAttribute('data-proj') === 'open') {
+      var pd = e.target.closest('.proj-menu'); if (pd) pd.open = false;
+      openProject(e.target.files && e.target.files[0]); e.target.value = ''; return;
+    }
+    onChange(e); onOptInput(e);
+  });
   document.addEventListener('toggle', function (e) {
     var g = e.target.getAttribute && e.target.getAttribute('data-g');
     if (g) S.open[g] = e.target.open;
@@ -2829,6 +2974,10 @@
     if (e.target.id === 'tech-view') S.techView = e.target.open;
   }, true);
   document.addEventListener('click', function (e) {
+    var pm = e.target.closest && e.target.closest('.proj-menu');
+    [].forEach.call(document.querySelectorAll('.proj-menu[open]'), function (d) {
+      if (d !== pm || e.target.closest('button.proj-item')) d.open = false;
+    });
     var a = e.target.closest && e.target.closest('a[data-scroll]');
     if (a) { try { sessionStorage.setItem('scrollTo', a.getAttribute('data-scroll')); } catch (x) { /* no storage */ }
       if (location.hash === a.getAttribute('href')) { e.preventDefault(); route(); } }

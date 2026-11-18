@@ -961,3 +961,24 @@ body[data-view="compare"] > .top, body[data-view="campus"] > .top { display: non
   .ws-head .btn { padding-left: 14px; padding-right: 14px; }
 }
 @media (min-width: 901px) and (max-width: 1499px) { .ws .ws-head .brand-title { display: none; } }
+/* Project file: Save project / Open project */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.proj-menu { position: relative; }
+.proj-menu > summary { list-style: none; cursor: pointer; min-height: 44px; }
+.proj-menu > summary::-webkit-details-marker { display: none; }
+.proj-menu > summary::after { content: ""; width: 7px; height: 7px; margin-left: 8px; border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+.proj-menu[open] > summary::after { transform: translateY(2px) rotate(-135deg); }
+.proj-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 40; width: 260px; max-width: calc(100vw - 32px);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .14); display: grid; gap: 2px; }
+.proj-item { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--ink); font: 600 15px var(--font); text-align: left; cursor: pointer; }
+.proj-item:hover { background: var(--ground); }
+.proj-item:focus-visible, .proj-item:focus-within { outline: 2px solid var(--ink); outline-offset: -2px; }
+.proj-hint { margin: 4px 12px 6px; font-size: 13px; line-height: 1.4; color: var(--muted); }
+#status { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.project-msg { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 50; margin: 0;
+  width: max-content; max-width: min(560px, calc(100vw - 32px)); padding: 12px 16px; border-radius: var(--radius-card);
+  background: var(--ink); color: #fff; font: 500 14px/1.4 var(--font); box-shadow: 0 4px 16px rgba(0, 0, 0, .2); }
+.project-msg.err { background: var(--bad); }
